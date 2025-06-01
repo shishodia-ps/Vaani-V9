@@ -79,7 +79,7 @@ class RSIDivergenceStrategy:
         try:
             delta = df['close'].diff()
             gain = delta.where(delta > 0, 0).rolling(window=self.rsi_period).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=self.rsi_period).mean()
+            loss = (-delta.where(delta < 0, 0.0)).rolling(window=self.rsi_period).mean()
             rs = gain / loss
             df['rsi'] = 100 - (100 / (1 + rs))
             return df
