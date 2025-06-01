@@ -775,49 +775,31 @@ double GenerateCorrelationHedgeSignal(string &reason)
 {
    reason = "Crisis Profit Strategy: ";
    
-   // Instead of closing positions, generate profitable hedging signals
-   if(g_crashDetected)
+   bool severe_crisis = (g_currentDrawdown > InpMaxDrawdownPercent * 0.9);
+   bool moderate_crisis = (g_currentDrawdown > InpMaxDrawdownPercent * 0.5);
+   
+   if(severe_crisis)
    {
-      // Determine crash direction
-      double prices[];
-      if(CopyClose(_Symbol, PERIOD_M15, 0, 3, prices) >= 3)
+      reason += "SEVERE CRISIS - Flattening all positions";
+      CloseAllPositions("Severe crisis protection");
+      return 0.0;
+   }
+   else if(moderate_crisis && InpCrisisProfitMode)
+   {
+      reason += "MODERATE CRISIS - Hedging positions";
+      
+      if(PositionsTotal() > 0)
       {
-         double recent_move = (prices[2] - prices[0]) / prices[0];
-         
-         if(recent_move < -InpCrashDetectionThreshold) // Downward crash
-         {
-            reason += "Shorting into downward crash for profit";
-            return -0.9; // Strong sell signal
-         }
-         else if(recent_move > InpCrashDetectionThreshold) // Upward spike
-         {
-            reason += "Buying into upward spike momentum";
-            return 0.9; // Strong buy signal
-         }
+         ExecuteHedgingStrategy();
+         return 0.0;
       }
    }
-   
-   // Volatility hedging strategy
-   if(g_volatilitySpike > InpVolatilitySpikeThreshold)
+   else if(InpCrisisProfitMode)
    {
-      double rsi = GetRSIValue(PERIOD_M15, 0);
+      reason += "VOLATILITY OPPORTUNITY - Counter-trend trading";
       
-      if(rsi > 70) // Overbought in high volatility
-      {
-         reason += "Volatility fade - selling overbought spike";
-         return -0.7;
-      }
-      else if(rsi < 30) // Oversold in high volatility
-      {
-         reason += "Volatility bounce - buying oversold dip";
-         return 0.7;
-      }
-      
-      // Straddle opportunity in extreme volatility
-      if(g_volatilitySpike > InpVolatilitySpikeThreshold * 1.5)
-      {
-         reason += "Extreme volatility - preparing straddle strategy";
-         return 0.5; // Moderate signal to trigger straddle logic
+      double volatility_signal = GenerateVolatilityProfitSignal();
+      return volatility_signal;
       }
    }
    
@@ -873,6 +855,30 @@ bool PassesRuleBasedFilters(double signal_strength)
 //+------------------------------------------------------------------+
 void ExecuteTradeSignal(double signal_strength, string reason)
 {
+   if(g_emergencyMode || g_tradingHalted)
+   {
+      Print("Trading halted - Emergency mode active");
+      return;
+   }
+   
+   if(IsWeekendOrGap())
+   {
+      Print("Weekend gap protection - Trading suspended");
+      return;
+   }
+   
+   if(!CheckSpreadConditions())
+   {
+      Print("Spread too wide for execution");
+      return;
+   }
+   
+   if(!CheckMarginAvailability(signal_strength))
+   {
+      Print("Insufficient margin for trade");
+      return;
+   }
+   
    double lot_size = CalculateSmartPositionSize(signal_strength);
    
    if(lot_size < InpMinPositionSize)
@@ -887,24 +893,57 @@ void ExecuteTradeSignal(double signal_strength, string reason)
    double sl = CalculateStopLoss(order_type, price);
    double tp = CalculateTakeProfit(order_type, price);
    
+   if(!OptimizeOrderExecution(order_type, price, sl, tp))
+   {
+      Print("Order execution optimization failed");
+      return;
+   }
+   
    string comment = StringFormat("VaaniV9[%s|%.2f|%.2f]", 
                                 EnumToString(g_activeStrategy), 
                                 signal_strength, 
                                 g_mlRiskLevel);
    
-   if(trade.PositionOpen(_Symbol, order_type, lot_size, price, sl, tp, comment))
+   int max_retries = 3;
+   int retry_count = 0;
+   bool execution_success = false;
+   
+   while(retry_count < max_retries && !execution_success)
    {
-      Print("Trade executed: ", reason);
-      Print("Type: ", EnumToString(order_type), " Size: ", lot_size, " Price: ", price);
-      g_lastTradeTime = TimeCurrent();
-      g_totalTrades++;
-      
-      // Log trade details
-      LogTradeExecution(order_type, lot_size, price, sl, tp, reason);
+      if(trade.PositionOpen(_Symbol, order_type, lot_size, price, sl, tp, comment))
+      {
+         Print("Trade executed: ", reason);
+         Print("Type: ", EnumToString(order_type), " Size: ", lot_size, " Price: ", price);
+         g_lastTradeTime = TimeCurrent();
+         g_totalTrades++;
+         execution_success = true;
+         
+         LogTradeExecution(order_type, lot_size, price, sl, tp, reason);
+      }
+      else
+      {
+         uint result_code = trade.ResultRetcode();
+         Print("Trade execution failed (attempt ", retry_count + 1, "): ", result_code);
+         
+         if(result_code == TRADE_RETCODE_REQUOTE || 
+            result_code == TRADE_RETCODE_PRICE_OFF ||
+            result_code == TRADE_RETCODE_TIMEOUT)
+         {
+            retry_count++;
+            Sleep(100);
+            
+            price = (order_type == ORDER_TYPE_BUY) ? symbol.Ask() : symbol.Bid();
+         }
+         else
+         {
+            break;
+         }
+      }
    }
-   else
+   
+   if(!execution_success)
    {
-      Print("Trade execution failed: ", trade.ResultRetcode());
+      Print("Trade execution failed after ", max_retries, " attempts");
    }
 }
 
@@ -1039,21 +1078,36 @@ void ApplyTrailingStop()
                          symbol.Bid() : symbol.Ask();
    double sl = position.StopLoss();
    double trailing_step = InpTrailingStep * symbol.Point();
+   double open_price = position.PriceOpen();
    
    if(position.PositionType() == POSITION_TYPE_BUY)
    {
       double new_sl = current_price - InpTrailingStart * symbol.Point();
-      if(new_sl > sl + trailing_step || sl == 0)
+      
+      if((new_sl > sl + trailing_step || sl == 0) && new_sl > open_price)
       {
-         trade.PositionModify(position.Ticket(), new_sl, position.TakeProfit());
+         if(current_price - new_sl >= InpTrailingStart * symbol.Point())
+         {
+            if(trade.PositionModify(position.Ticket(), new_sl, position.TakeProfit()))
+            {
+               Print("Trailing stop updated for BUY position: ", new_sl);
+            }
+         }
       }
    }
    else
    {
       double new_sl = current_price + InpTrailingStart * symbol.Point();
-      if(new_sl < sl - trailing_step || sl == 0)
+      
+      if((new_sl < sl - trailing_step || sl == 0) && new_sl < open_price)
       {
-         trade.PositionModify(position.Ticket(), new_sl, position.TakeProfit());
+         if(new_sl - current_price >= InpTrailingStart * symbol.Point())
+         {
+            if(trade.PositionModify(position.Ticket(), new_sl, position.TakeProfit()))
+            {
+               Print("Trailing stop updated for SELL position: ", new_sl);
+            }
+         }
       }
    }
 }
@@ -1466,6 +1520,81 @@ double GetVolumeRatio()
    long avg_volume[];
    
    if(CopyTickVolume(_Symbol, PERIOD_M15, 0, 1, current_volume) > 0 &&
+
+bool IsWeekendOrGap()
+{
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   
+   if(dt.day_of_week == 6 || dt.day_of_week == 0)
+      return true;
+      
+   if(dt.day_of_week == 5 && dt.hour >= 22)
+      return true;
+      
+   if(dt.day_of_week == 1 && dt.hour < 1)
+      return true;
+   
+   if(dt.day_of_week == 1 && dt.hour >= 1 && dt.hour <= 3)
+   {
+      static double friday_close = 0.0;
+      static bool friday_close_set = false;
+      
+      if(!friday_close_set)
+      {
+         double close_prices[];
+         if(CopyClose(_Symbol, PERIOD_H1, 1, 1, close_prices) > 0)
+         {
+            friday_close = close_prices[0];
+            friday_close_set = true;
+         }
+      }
+      
+      if(friday_close_set)
+      {
+         double current_price = (symbol.Ask() + symbol.Bid()) / 2;
+         double gap_size = MathAbs(current_price - friday_close) / friday_close * 100;
+         
+         if(gap_size > 0.5)
+         {
+            Print("Monday gap detected: ", gap_size, "% - Trading suspended");
+            return true;
+         }
+      }
+   }
+   
+   return false;
+}
+
+bool CheckMarginAvailability(double signal_strength)
+{
+   double lot_size = CalculateSmartPositionSize(signal_strength);
+   
+   double margin_required = 0.0;
+   if(!OrderCalcMargin(ORDER_TYPE_BUY, _Symbol, lot_size, symbol.Ask(), margin_required))
+   {
+      Print("Failed to calculate margin requirement");
+      return false;
+   }
+   
+   double free_margin = account.FreeMargin();
+   double margin_level = account.MarginLevel();
+   
+   if(free_margin < margin_required * 2.0)
+   {
+      Print("Insufficient free margin. Required: ", margin_required * 2.0, " Available: ", free_margin);
+      return false;
+   }
+   
+   if(margin_level > 0 && margin_level < 300.0)
+   {
+      Print("Margin level too low: ", margin_level, "%");
+      return false;
+   }
+   
+   return true;
+}
+
       CopyTickVolume(_Symbol, PERIOD_M15, 0, 20, avg_volume) > 0)
    {
       long sum = 0;
@@ -1512,14 +1641,27 @@ bool IsMarketHours()
    MqlDateTime dt;
    TimeToStruct(TimeCurrent(), dt);
    
-   // Major forex market hours (simplified)
    int hour = dt.hour;
+   int day_of_week = dt.day_of_week;
    
-   // London: 8-17, New York: 13-22, Tokyo: 0-9, Sydney: 22-7
-   if((hour >= 0 && hour <= 9) ||   // Tokyo
-      (hour >= 8 && hour <= 17) ||  // London
-      (hour >= 13 && hour <= 22) || // New York
-      (hour >= 22 && hour <= 23))   // Sydney start
+   if(day_of_week == 6 || day_of_week == 0)
+      return false;
+   
+   if(hour >= 22 || hour <= 0)
+   {
+      Print("Low liquidity period - Post US close");
+      return false;
+   }
+   
+   if(hour >= 5 && hour <= 6)
+   {
+      Print("Low liquidity period - Asian lunch");
+      return false;
+   }
+   
+   if((hour >= 1 && hour <= 9) ||
+      (hour >= 8 && hour <= 17) ||
+      (hour >= 13 && hour <= 21))
       return true;
    
    return false;

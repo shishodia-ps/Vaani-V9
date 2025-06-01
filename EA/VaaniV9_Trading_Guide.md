@@ -359,6 +359,81 @@ InpHedgeWeight = 10           // 10% correlation hedge
 
 ---
 
+## 🚨 **Critical Edge Case Handling - Production Ready Features**
+
+### **1. Spread Widening Around News**
+**How it works:** EA monitors spread conditions in real-time before every trade execution
+- **Normal spreads:** Max 5 pips (50 points) for EURUSD
+- **News periods:** Automatically increases threshold to 20 pips during high-impact news
+- **Action:** If spread exceeds threshold, trade execution is blocked until spreads normalize
+- **Example:** During NFP announcement, if spread widens to 15 pips, EA waits until it returns to normal levels
+
+### **2. Stop Loss Gapped Over During CPI/FOMC**
+**How it works:** EA uses multiple protection layers against gap risk
+- **Pre-news protection:** Reduces position sizes 30 minutes before major announcements
+- **Gap detection:** Monitors for price gaps > 0.5% on Monday opens or after news
+- **Emergency hedging:** If SL is gapped over, immediately opens counter-position to limit damage
+- **Example:** If CPI causes 200-pip gap past your SL, EA opens opposite trade to recover 50% of loss
+
+### **3. Trade Retry Logic for Requotes**
+**How it works:** EA implements 3-attempt retry system for failed executions
+- **Retryable errors:** TRADE_RETCODE_REQUOTE, TRADE_RETCODE_PRICE_OFF, TRADE_RETCODE_TIMEOUT
+- **Retry process:** Updates price, waits 100ms, attempts again (max 3 times)
+- **Non-retryable errors:** Insufficient margin, invalid parameters - no retry
+- **Example:** If broker requotes your order, EA automatically retries with updated price
+
+### **4. Trailing Stops Moving Into Negative Space**
+**How it works:** Enhanced trailing stop logic prevents worsening positions
+- **Safety check:** New trailing stop must be better than current stop AND better than entry price
+- **Distance validation:** Ensures minimum distance from current price (300 points)
+- **Direction protection:** BUY positions can only move SL higher, SELL positions only lower
+- **Example:** For BUY at 1.1000, trailing stop will never move below 1.1000 (entry price)
+
+### **5. Drawdown Emergency Stop Behavior**
+**How it works:** Real-time drawdown monitoring with immediate action
+- **Continuous monitoring:** Checked before every trade execution, not just periodically
+- **10% drawdown trigger:** Immediately activates emergency mode and halts all new trades
+- **15% drawdown trigger:** Closes all positions and enters capital preservation mode
+- **Recovery logic:** Trading resumes only when drawdown drops below 5%
+
+### **6. Lot Size Recalculation and Margin Checks**
+**How it works:** Dynamic position sizing with comprehensive margin validation
+- **Every trade:** Lot size recalculated based on current account balance and free margin
+- **Margin requirements:** Ensures 200% of required margin is available before trade
+- **Margin level check:** Maintains minimum 300% margin level at all times
+- **Example:** $1000 account with 50% margin used will reduce position sizes by 50%
+
+### **7. Slippage Control During Market Orders**
+**How it works:** Multi-layer slippage protection system
+- **Maximum slippage:** Capped at 30 points (3 pips) for all market orders
+- **Volatility adjustment:** Increases slippage tolerance during high volatility periods
+- **Execution optimization:** Pre-adjusts entry price based on current market conditions
+- **Example:** During volatile periods, EA adjusts entry price by ATR*0.1 to account for slippage
+
+### **8. Crisis Mode: Hedge vs Flatten Decision**
+**How it works:** Intelligent crisis management based on severity levels
+- **Severe crisis (>13.5% drawdown):** Immediately flattens all positions for capital protection
+- **Moderate crisis (>7.5% drawdown):** Hedges existing positions with 30% counter-trades
+- **Mild volatility:** Opens counter-trend trades to profit from volatility spikes
+- **Example:** 8% drawdown triggers hedging, 14% drawdown triggers complete position closure
+
+### **9. Internet Disconnection Recovery**
+**How it works:** EA automatically restores position tracking on restart
+- **Position scanning:** On startup, scans all open positions with EA's magic number
+- **State restoration:** Rebuilds internal tracking for all existing positions
+- **Continuation logic:** Resumes trailing stops and management for existing trades
+- **Example:** After internet outage, EA automatically finds and manages your open EURUSD position
+
+### **10. Low Liquidity Hour Filtering**
+**How it works:** Comprehensive time-based trading filters
+- **Post-US close:** No trading 22:00-00:00 GMT (low liquidity period)
+- **Asian lunch:** No trading 05:00-06:00 GMT (reduced activity)
+- **Weekend protection:** No trading Friday 22:00 GMT to Monday 01:00 GMT
+- **Holiday detection:** Automatically reduces activity during major holidays
+- **Example:** EA will not open new trades at 23:00 GMT on Tuesday due to low liquidity
+
+---
+
 *This guide provides a complete understanding of how VaaniV9 Elite EA operates with your $1000 trading account. The EA is designed to grow your capital exponentially while protecting against major losses through advanced crisis management and adaptive strategies.*
 
 **Remember**: Trading involves risk. Past performance doesn't guarantee future results. Always trade with money you can afford to lose.
