@@ -7,6 +7,13 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from enum import Enum
 import numpy as np
+from strategies import (
+    RSIDivergenceStrategy, MACrossoverStrategy, GridStrategy, MartingaleStrategy,
+    LondonBreakoutStrategy, NewsFadeStrategy, NYReversalStrategy, CPIFadeStrategy,
+    PullbackStrategy, ScalpingStrategy, TailRiskProtectionStrategy, TrendFollowingStrategy,
+    BreakoutReversalStrategy, StochasticStrategy, VaaniV9Strategy
+)
+
 import pandas as pd
 
 class MarketRegime(Enum):
@@ -38,6 +45,24 @@ class StrategySelector:
         self.volatility_threshold_high = 0.02
         self.volatility_threshold_low = 0.005
         self.trend_strength_threshold = 0.6
+        
+        self.available_strategies = {
+            "rsi_divergence": RSIDivergenceStrategy,
+            "ma_crossover": MACrossoverStrategy,
+            "grid": GridStrategy,
+            "martingale": MartingaleStrategy,
+            "london_breakout": LondonBreakoutStrategy,
+            "news_fade": NewsFadeStrategy,
+            "ny_reversal": NYReversalStrategy,
+            "cpi_fade": CPIFadeStrategy,
+            "pullback": PullbackStrategy,
+            "scalping": ScalpingStrategy,
+            "tail_risk_protection": TailRiskProtectionStrategy,
+            "trend_following": TrendFollowingStrategy,
+            "breakout_reversal": BreakoutReversalStrategy,
+            "stochastic": StochasticStrategy,
+            "vaani_v9": VaaniV9Strategy
+        }
         
     def select_optimal_strategy(self, symbol: str = "EURUSD") -> Dict[str, Any]:
         """Select the optimal strategy based on current market conditions"""
