@@ -26,6 +26,14 @@ input int      InpMagicNumber = 20250601;      // Magic number
 input bool     InpAdaptiveMode = true;         // Enable adaptive mode
 input bool     InpMLEnhanced = true;           // Enable ML-enhanced signals
 
+input group "=== Crisis Profit Management ==="
+input bool     InpCrisisProfitMode = true;     // Enable crisis profit trading
+input double   InpHedgeRatio = 0.3;            // Hedge position ratio (30%)
+input double   InpVolatilitySpikeThreshold = 3.0; // Volatility spike threshold (300%)
+input double   InpCrashDetectionThreshold = 0.02; // Price drop threshold (2%)
+input bool     InpCounterTrendTrading = true;  // Enable counter-trend during crashes
+input double   InpRecoveryMultiplier = 1.5;    // Recovery trade size multiplier
+
 input group "=== Multi-Strategy Fusion ==="
 input bool     InpTrendFollowing = true;       // Enable trend following
 input bool     InpMeanReversion = true;        // Enable mean reversion
@@ -107,6 +115,15 @@ bool           g_emergencyMode = false;
 bool           g_tradingHalted = false;
 datetime       g_lastTradeTime = 0;
 datetime       g_lastResetTime = 0;
+
+// Crisis profit management variables
+bool           g_crisisMode = false;
+bool           g_crashDetected = false;
+bool           g_recoveryMode = false;
+double         g_lastVolatility = 0.0;
+double         g_volatilitySpike = 1.0;
+int            g_activeHedges = 0;
+datetime       g_lastCrashTime = 0;
 
 // Performance tracking
 int            g_totalTrades = 0;
@@ -201,16 +218,28 @@ void OnTick()
    // Update current state
    UpdateMarketState();
    
-   // Check emergency conditions
-   if(CheckEmergencyConditions())
+   // Enhanced crisis management - profit from volatility instead of just stopping
+   if(CheckCrisisConditions())
    {
-      if(!g_emergencyMode)
+      if(!g_crisisMode && InpCrisisProfitMode)
+      {
+         Print("CRISIS PROFIT MODE ACTIVATED - Engaging profitable hedging strategies");
+         g_crisisMode = true;
+         ExecuteCrisisProfitStrategy();
+      }
+      else if(!g_crisisMode)
       {
          Print("EMERGENCY MODE ACTIVATED - Capital Protection Engaged");
          g_emergencyMode = true;
          CloseAllPositions("Emergency stop");
       }
       return;
+   }
+   
+   // Check for flash crash opportunities
+   if(DetectFlashCrash())
+   {
+      ExecuteFlashCrashStrategy();
    }
    
    // Check if trading is halted
@@ -341,35 +370,77 @@ void UpdateMarketState()
 }
 
 //+------------------------------------------------------------------+
-//| Check Emergency Conditions                                       |
+//| Check Crisis Conditions (Enhanced for Profit Opportunities)     |
 //+------------------------------------------------------------------+
-bool CheckEmergencyConditions()
+bool CheckCrisisConditions()
 {
-   // Check maximum drawdown
-   if(g_currentDrawdown > InpMaxDrawdownPercent)
-   {
-      Print("ALERT: Maximum drawdown exceeded: ", g_currentDrawdown, "%");
-      return true;
-   }
-   
-   // Check volatility spike
+   // Update volatility metrics
    double atr_current = GetATRValue(PERIOD_M15, 0);
    double atr_average = GetATRAverage(PERIOD_M15, 20);
+   g_volatilitySpike = (atr_average > 0) ? atr_current / atr_average : 1.0;
    
-   if(atr_current > atr_average * InpVolatilityThreshold)
+   // Crisis conditions (lower threshold for profit opportunities)
+   if(g_currentDrawdown > InpMaxDrawdownPercent * 0.7) // 70% of max drawdown
    {
-      Print("ALERT: Volatility spike detected - ATR: ", atr_current, " vs Average: ", atr_average);
+      Print("ALERT: Approaching maximum drawdown: ", g_currentDrawdown, "%");
       return true;
    }
    
-   // Check spread conditions
+   // Volatility spike detection (profit opportunity)
+   if(g_volatilitySpike > InpVolatilitySpikeThreshold)
+   {
+      Print("OPPORTUNITY: Volatility spike detected - ", g_volatilitySpike, "x normal levels");
+      return true;
+   }
+   
+   // Account equity check (only extreme cases)
+   double current_equity = account.Equity();
+   if(current_equity < account.Balance() * 0.5) // 50% equity loss (extreme)
+   {
+      Print("ALERT: Severe equity loss detected");
+      return true;
+   }
+   
+   // Check spread conditions (still important for execution)
    double spread = symbol.Spread() * symbol.Point();
    double normal_spread = InpMaxSpreadPoints * symbol.Point();
    
-   if(spread > normal_spread * 3.0)
+   if(spread > normal_spread * 4.0) // Higher threshold for crisis mode
    {
-      Print("ALERT: Abnormal spread detected: ", spread);
+      Print("ALERT: Extreme spread detected: ", spread);
       return true;
+   }
+   
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Detect Flash Crash Conditions                                   |
+//+------------------------------------------------------------------+
+bool DetectFlashCrash()
+{
+   if(!InpCounterTrendTrading)
+      return false;
+   
+   // Get recent price movement
+   double prices[];
+   if(CopyClose(_Symbol, PERIOD_M15, 0, 5, prices) < 5)
+      return false;
+   
+   // Calculate rapid price movement (last 5 M15 candles = 75 minutes)
+   double price_change = (prices[4] - prices[0]) / prices[0];
+   
+   // Flash crash detection
+   if(MathAbs(price_change) > InpCrashDetectionThreshold && 
+      g_volatilitySpike > InpVolatilitySpikeThreshold)
+   {
+      if(TimeCurrent() - g_lastCrashTime > 3600) // At least 1 hour between crash detections
+      {
+         g_lastCrashTime = TimeCurrent();
+         g_crashDetected = true;
+         Print("FLASH CRASH DETECTED: ", price_change*100, "% move with ", g_volatilitySpike, "x volatility");
+         return true;
+      }
    }
    
    return false;
@@ -698,20 +769,60 @@ double GenerateVolatilitySignal(string &reason)
 }
 
 //+------------------------------------------------------------------+
-//| Generate Correlation Hedge Signal                               |
+//| Generate Correlation Hedge Signal (Enhanced Crisis Profit)     |
 //+------------------------------------------------------------------+
 double GenerateCorrelationHedgeSignal(string &reason)
 {
-   // Crisis mode - focus on capital preservation
-   reason = "Crisis Hedge: Capital preservation mode";
+   reason = "Crisis Profit Strategy: ";
    
-   // Close existing positions and avoid new trades
-   if(PositionsTotal() > 0)
+   // Instead of closing positions, generate profitable hedging signals
+   if(g_crashDetected)
    {
-      CloseAllPositions("Crisis hedge");
+      // Determine crash direction
+      double prices[];
+      if(CopyClose(_Symbol, PERIOD_M15, 0, 3, prices) >= 3)
+      {
+         double recent_move = (prices[2] - prices[0]) / prices[0];
+         
+         if(recent_move < -InpCrashDetectionThreshold) // Downward crash
+         {
+            reason += "Shorting into downward crash for profit";
+            return -0.9; // Strong sell signal
+         }
+         else if(recent_move > InpCrashDetectionThreshold) // Upward spike
+         {
+            reason += "Buying into upward spike momentum";
+            return 0.9; // Strong buy signal
+         }
+      }
    }
    
-   return 0.0; // No new positions in crisis mode
+   // Volatility hedging strategy
+   if(g_volatilitySpike > InpVolatilitySpikeThreshold)
+   {
+      double rsi = GetRSIValue(PERIOD_M15, 0);
+      
+      if(rsi > 70) // Overbought in high volatility
+      {
+         reason += "Volatility fade - selling overbought spike";
+         return -0.7;
+      }
+      else if(rsi < 30) // Oversold in high volatility
+      {
+         reason += "Volatility bounce - buying oversold dip";
+         return 0.7;
+      }
+      
+      // Straddle opportunity in extreme volatility
+      if(g_volatilitySpike > InpVolatilitySpikeThreshold * 1.5)
+      {
+         reason += "Extreme volatility - preparing straddle strategy";
+         return 0.5; // Moderate signal to trigger straddle logic
+      }
+   }
+   
+   reason += "Monitoring for crisis opportunities";
+   return 0.0;
 }
 
 //+------------------------------------------------------------------+
@@ -1054,8 +1165,21 @@ bool ShouldGenerateSignals()
 
 bool ShouldResumeTrading()
 {
-   return g_currentDrawdown < InpMaxDrawdownPercent * 0.8 && 
-          !CheckEmergencyConditions();
+   // Resume when volatility normalizes and drawdown improves
+   bool volatility_normalized = g_volatilitySpike < InpVolatilitySpikeThreshold * 0.7;
+   bool drawdown_improved = g_currentDrawdown < InpMaxDrawdownPercent * 0.6;
+   bool no_crisis = !CheckCrisisConditions();
+   
+   if(volatility_normalized && drawdown_improved && no_crisis)
+   {
+      g_crisisMode = false;
+      g_crashDetected = false;
+      g_recoveryMode = false;
+      g_activeHedges = 0;
+      return true;
+   }
+   
+   return false;
 }
 
 bool ShouldPerformDailyReset()
@@ -1087,6 +1211,200 @@ void CloseAllPositions(string reason)
          trade.PositionClose(position.Ticket());
          Print("Position closed: ", reason);
       }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Execute Crisis Profit Strategy                                  |
+//+------------------------------------------------------------------+
+void ExecuteCrisisProfitStrategy()
+{
+   Print("Executing Crisis Profit Strategy - Seeking opportunities in volatility");
+   
+   // Don't close existing positions - instead add hedging positions
+   int existing_positions = PositionsTotal();
+   
+   if(existing_positions > 0)
+   {
+      // Add hedging positions instead of closing
+      AddHedgingPositions();
+   }
+   
+   // Look for counter-trend opportunities
+   if(InpCounterTrendTrading)
+   {
+      ExecuteCounterTrendStrategy();
+   }
+   
+   // Implement straddle strategy for high volatility
+   ExecuteVolatilityStraddle();
+}
+
+//+------------------------------------------------------------------+
+//| Add Hedging Positions                                           |
+//+------------------------------------------------------------------+
+void AddHedgingPositions()
+{
+   for(int i = 0; i < PositionsTotal(); i++)
+   {
+      if(position.SelectByIndex(i) && position.Symbol() == _Symbol && 
+         position.Magic() == InpMagicNumber)
+      {
+         // Calculate hedge size
+         double original_lots = position.Volume();
+         double hedge_lots = original_lots * InpHedgeRatio;
+         hedge_lots = NormalizeDouble(hedge_lots, 2);
+         
+         if(hedge_lots >= symbol.LotsMin())
+         {
+            // Open opposite position as hedge
+            ENUM_ORDER_TYPE hedge_type = (position.PositionType() == POSITION_TYPE_BUY) ? 
+                                        ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+            
+            double price = (hedge_type == ORDER_TYPE_BUY) ? symbol.Ask() : symbol.Bid();
+            
+            // Tight stops for hedge positions
+            double hedge_sl = (hedge_type == ORDER_TYPE_BUY) ? 
+                             price - 200 * symbol.Point() : 
+                             price + 200 * symbol.Point();
+            
+            double hedge_tp = (hedge_type == ORDER_TYPE_BUY) ? 
+                             price + 300 * symbol.Point() : 
+                             price - 300 * symbol.Point();
+            
+            if(trade.OrderOpen(_Symbol, hedge_type, hedge_lots, price, hedge_sl, hedge_tp, 
+                              "Crisis Hedge"))
+            {
+               g_activeHedges++;
+               Print("Hedge position opened: ", hedge_lots, " lots, Type: ", 
+                     EnumToString(hedge_type));
+            }
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Execute Flash Crash Strategy                                    |
+//+------------------------------------------------------------------+
+void ExecuteFlashCrashStrategy()
+{
+   if(!g_crashDetected)
+      return;
+   
+   Print("Executing Flash Crash Profit Strategy");
+   
+   // Determine crash direction and trade accordingly
+   double prices[];
+   if(CopyClose(_Symbol, PERIOD_M15, 0, 5, prices) >= 5)
+   {
+      double crash_magnitude = (prices[4] - prices[0]) / prices[0];
+      double lot_size = CalculateSmartPositionSize(0.8) * InpRecoveryMultiplier;
+      
+      if(crash_magnitude < -InpCrashDetectionThreshold) // Downward crash
+      {
+         // Short into the crash for additional profit
+         double price = symbol.Bid();
+         double sl = price + 150 * symbol.Point(); // Tight stop
+         double tp = price - 400 * symbol.Point(); // Larger target
+         
+         if(trade.OrderOpen(_Symbol, ORDER_TYPE_SELL, lot_size, price, sl, tp, 
+                           "Flash Crash Short"))
+         {
+            Print("Flash crash short executed: ", lot_size, " lots at ", price);
+         }
+      }
+      else if(crash_magnitude > InpCrashDetectionThreshold) // Upward spike
+      {
+         // Buy into the spike momentum
+         double price = symbol.Ask();
+         double sl = price - 150 * symbol.Point();
+         double tp = price + 400 * symbol.Point();
+         
+         if(trade.OrderOpen(_Symbol, ORDER_TYPE_BUY, lot_size, price, sl, tp, 
+                           "Flash Crash Long"))
+         {
+            Print("Flash crash long executed: ", lot_size, " lots at ", price);
+         }
+      }
+   }
+   
+   g_crashDetected = false; // Reset flag
+}
+
+//+------------------------------------------------------------------+
+//| Execute Counter-Trend Strategy                                  |
+//+------------------------------------------------------------------+
+void ExecuteCounterTrendStrategy()
+{
+   double rsi = GetRSIValue(PERIOD_M15, 0);
+   double current_price = symbol.Bid();
+   double lot_size = CalculateSmartPositionSize(0.6);
+   
+   // Counter-trend trades during high volatility
+   if(g_volatilitySpike > InpVolatilitySpikeThreshold)
+   {
+      if(rsi > 75) // Extremely overbought
+      {
+         double price = symbol.Bid();
+         double sl = price + 100 * symbol.Point();
+         double tp = price - 250 * symbol.Point();
+         
+         if(trade.OrderOpen(_Symbol, ORDER_TYPE_SELL, lot_size, price, sl, tp, 
+                           "Counter-trend Sell"))
+         {
+            Print("Counter-trend sell executed during volatility spike");
+         }
+      }
+      else if(rsi < 25) // Extremely oversold
+      {
+         double price = symbol.Ask();
+         double sl = price - 100 * symbol.Point();
+         double tp = price + 250 * symbol.Point();
+         
+         if(trade.OrderOpen(_Symbol, ORDER_TYPE_BUY, lot_size, price, sl, tp, 
+                           "Counter-trend Buy"))
+         {
+            Print("Counter-trend buy executed during volatility spike");
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Execute Volatility Straddle Strategy                           |
+//+------------------------------------------------------------------+
+void ExecuteVolatilityStraddle()
+{
+   if(g_volatilitySpike < InpVolatilitySpikeThreshold)
+      return;
+   
+   // Place both buy and sell orders to capture volatility movement
+   double current_price = (symbol.Ask() + symbol.Bid()) / 2;
+   double lot_size = CalculateSmartPositionSize(0.4); // Smaller size for straddle
+   double spread = symbol.Spread() * symbol.Point();
+   
+   // Buy order above current price
+   double buy_price = current_price + 50 * symbol.Point() + spread;
+   double buy_sl = buy_price - 150 * symbol.Point();
+   double buy_tp = buy_price + 300 * symbol.Point();
+   
+   // Sell order below current price  
+   double sell_price = current_price - 50 * symbol.Point();
+   double sell_sl = sell_price + 150 * symbol.Point();
+   double sell_tp = sell_price - 300 * symbol.Point();
+   
+   // Place pending orders
+   if(trade.OrderOpen(_Symbol, ORDER_TYPE_BUY_STOP, lot_size, buy_price, buy_sl, buy_tp, 
+                     "Volatility Straddle Buy"))
+   {
+      Print("Volatility straddle buy stop placed at ", buy_price);
+   }
+   
+   if(trade.OrderOpen(_Symbol, ORDER_TYPE_SELL_STOP, lot_size, sell_price, sell_sl, sell_tp, 
+                     "Volatility Straddle Sell"))
+   {
+      Print("Volatility straddle sell stop placed at ", sell_price);
    }
 }
 
