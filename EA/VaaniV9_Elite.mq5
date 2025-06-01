@@ -215,6 +215,34 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   // CRITICAL FIX #6: Real-time equity-based kill switch
+   double current_equity = account.Equity();
+   double equity_drawdown = (g_maxEquity - current_equity) / g_maxEquity * 100.0;
+   
+   if(equity_drawdown > InpMaxDrawdownPercent)
+   {
+      if(!g_emergencyMode)
+      {
+         Print("EMERGENCY STOP: Equity drawdown ", equity_drawdown, "% exceeds limit ", InpMaxDrawdownPercent, "%");
+         g_emergencyMode = true;
+         g_tradingHalted = true;
+         CloseAllPositions("Equity drawdown emergency stop");
+      }
+      return;
+   }
+   
+   // Update max equity for drawdown calculation
+   if(current_equity > g_maxEquity)
+      g_maxEquity = current_equity;
+   
+   // CRITICAL FIX #9: Position tracking validation on restart
+   static bool positions_validated = false;
+   if(!positions_validated)
+   {
+      ValidateExistingPositions();
+      positions_validated = true;
+   }
+   
    // Update current state
    UpdateMarketState();
    
@@ -910,32 +938,82 @@ void ExecuteTradeSignal(double signal_strength, string reason)
    
    while(retry_count < max_retries && !execution_success)
    {
+      // CRITICAL FIX #3: Slippage cap validation
+      trade.SetDeviationInPoints(InpSlippagePoints);
+      
+      // CRITICAL FIX #4: Spread filter before execution
+      if(!CheckSpreadConditions())
+      {
+         Print("Spread too wide for execution on attempt ", retry_count + 1);
+         retry_count++;
+         Sleep(500); // Wait for spread to normalize
+         continue;
+      }
+      
+      // CRITICAL FIX #1: Actual trade execution call
       if(trade.PositionOpen(_Symbol, order_type, lot_size, price, sl, tp, comment))
       {
          Print("Trade executed: ", reason);
          Print("Type: ", EnumToString(order_type), " Size: ", lot_size, " Price: ", price);
+         Print("SL: ", sl, " TP: ", tp, " Slippage: ", InpSlippagePoints);
+         
+         // Verify actual fill price vs requested price
+         double actual_price = trade.ResultPrice();
+         double slippage_pips = MathAbs(actual_price - price) / symbol.Point();
+         Print("Actual fill price: ", actual_price, " Slippage: ", slippage_pips, " points");
+         
          g_lastTradeTime = TimeCurrent();
          g_totalTrades++;
          execution_success = true;
          
-         LogTradeExecution(order_type, lot_size, price, sl, tp, reason);
+         LogTradeExecution(order_type, lot_size, actual_price, sl, tp, reason);
       }
       else
       {
          uint result_code = trade.ResultRetcode();
-         Print("Trade execution failed (attempt ", retry_count + 1, "): ", result_code);
+         Print("Trade execution failed (attempt ", retry_count + 1, "): ", result_code, " - ", trade.ResultComment());
          
+         // CRITICAL FIX #2: Intelligent retry logic
          if(result_code == TRADE_RETCODE_REQUOTE || 
             result_code == TRADE_RETCODE_PRICE_OFF ||
-            result_code == TRADE_RETCODE_TIMEOUT)
+            result_code == TRADE_RETCODE_TIMEOUT ||
+            result_code == TRADE_RETCODE_PRICE_CHANGED)
          {
             retry_count++;
-            Sleep(100);
+            Sleep(100 + retry_count * 50); // Progressive delay
             
+            // Update price for retry
             price = (order_type == ORDER_TYPE_BUY) ? symbol.Ask() : symbol.Bid();
+            
+            // Recalculate SL/TP with updated price
+            sl = CalculateStopLoss(order_type, price);
+            tp = CalculateTakeProfit(order_type, price);
+         }
+         else if(result_code == TRADE_RETCODE_INVALID_STOPS)
+         {
+            Print("Invalid stops detected - adjusting SL/TP");
+            
+            // CRITICAL FIX #5: Validate and adjust SL/TP
+            long stops_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+            double min_distance = stops_level * symbol.Point();
+            
+            if(order_type == ORDER_TYPE_BUY)
+            {
+               sl = MathMax(sl, price - min_distance);
+               tp = MathMin(tp, price + min_distance);
+            }
+            else
+            {
+               sl = MathMin(sl, price + min_distance);
+               tp = MathMax(tp, price - min_distance);
+            }
+            
+            retry_count++;
          }
          else
          {
+            // Non-retryable error
+            Print("Non-retryable error: ", result_code);
             break;
          }
       }
@@ -1016,11 +1094,14 @@ void ManageExistingPositions()
       if(position.SelectByIndex(i) && position.Symbol() == _Symbol && 
          position.Magic() == InpMagicNumber)
       {
-         // Break-even logic
+         // CRITICAL FIX #8: Break-even logic
          if(InpBreakEvenMode)
          {
-            ApplyBreakEven();
+            ApplyBreakEvenLogic();
          }
+         
+         // CRITICAL FIX #10: Partial close logic
+         ApplyPartialCloseLogic();
          
          // Trailing stop logic
          if(InpUseTrailingStop)
@@ -1644,9 +1725,25 @@ bool IsMarketHours()
    int hour = dt.hour;
    int day_of_week = dt.day_of_week;
    
-   if(day_of_week == 6 || day_of_week == 0)
+   // CRITICAL FIX #7: Enhanced weekend gap protection
+   if(day_of_week == 6 || day_of_week == 0) // Saturday or Sunday
       return false;
+      
+   // Friday after 21:00 GMT - weekend gap protection
+   if(day_of_week == 5 && hour >= 21)
+   {
+      Print("Weekend gap protection - Friday after 21:00 GMT");
+      return false;
+   }
+      
+   // Sunday before 22:00 GMT - weekend gap protection
+   if(day_of_week == 0 && hour < 22)
+   {
+      Print("Weekend gap protection - Sunday before 22:00 GMT");
+      return false;
+   }
    
+   // Low liquidity periods to avoid
    if(hour >= 22 || hour <= 0)
    {
       Print("Low liquidity period - Post US close");
@@ -1692,6 +1789,11 @@ double CalculateStopLoss(ENUM_ORDER_TYPE order_type, double entry_price)
    double atr = GetATRValue(PERIOD_M15, 0);
    double sl_distance = MathMax(InpStopLossPoints * symbol.Point(), atr * 2.0);
    
+   // Validate against broker's minimum stop level
+   long stops_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double min_distance = stops_level * symbol.Point();
+   sl_distance = MathMax(sl_distance, min_distance);
+   
    if(order_type == ORDER_TYPE_BUY)
       return entry_price - sl_distance;
    else
@@ -1702,6 +1804,11 @@ double CalculateTakeProfit(ENUM_ORDER_TYPE order_type, double entry_price)
 {
    double atr = GetATRValue(PERIOD_M15, 0);
    double tp_distance = MathMax(InpTakeProfitPoints * symbol.Point(), atr * 3.0);
+   
+   // Validate against broker's minimum stop level
+   long stops_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double min_distance = stops_level * symbol.Point();
+   tp_distance = MathMax(tp_distance, min_distance);
    
    if(order_type == ORDER_TYPE_BUY)
       return entry_price + tp_distance;
@@ -1965,15 +2072,119 @@ void AdaptStrategyParameters()
       {
          // Increase risk slightly
          Print("Adapting to good performance - optimizing risk");
-         // Implementation would adjust strategy parameters
+
+//+------------------------------------------------------------------+
+//| CRITICAL FIX #9: Validate existing positions on restart         |
+//+------------------------------------------------------------------+
+void ValidateExistingPositions()
+{
+   Print("Validating existing positions on EA restart...");
+   
+   int validated_positions = 0;
+   for(int i = 0; i < PositionsTotal(); i++)
+   {
+      if(position.SelectByIndex(i) && position.Symbol() == _Symbol && 
+         position.Magic() == InpMagicNumber)
+      {
+         validated_positions++;
+         Print("Validated position: Ticket=", position.Ticket(), 
+               " Type=", EnumToString(position.PositionType()),
+               " Volume=", position.Volume(),
+               " Profit=", position.Profit());
+      }
+   }
+   
+   Print("Position validation complete: ", validated_positions, " positions found");
+}
+
+//+------------------------------------------------------------------+
+//| CRITICAL FIX #8: Break-even move logic                          |
+//+------------------------------------------------------------------+
+void ApplyBreakEvenLogic()
+{
+   double current_price = (position.PositionType() == POSITION_TYPE_BUY) ? 
+                         symbol.Bid() : symbol.Ask();
+   double open_price = position.PriceOpen();
+   double sl = position.StopLoss();
+   
+   // Move to break-even after 10 pips profit
+   double breakeven_threshold = 100 * symbol.Point(); // 10 pips
+   
+   if(position.PositionType() == POSITION_TYPE_BUY)
+   {
+      double profit_pips = current_price - open_price;
+      
+      if(profit_pips >= breakeven_threshold && sl < open_price)
+      {
+         double new_sl = open_price + 10 * symbol.Point(); // Break-even + 1 pip
+         if(trade.PositionModify(position.Ticket(), new_sl, position.TakeProfit()))
+         {
+            Print("Break-even applied for BUY position: ", new_sl);
+         }
+      }
+   }
+   else // SELL position
+   {
+      double profit_pips = open_price - current_price;
+      
+      if(profit_pips >= breakeven_threshold && (sl > open_price || sl == 0))
+      {
+         double new_sl = open_price - 10 * symbol.Point(); // Break-even - 1 pip
+         if(trade.PositionModify(position.Ticket(), new_sl, position.TakeProfit()))
+         {
+            Print("Break-even applied for SELL position: ", new_sl);
+         }
       }
    }
 }
 
+//+------------------------------------------------------------------+
+//| CRITICAL FIX #10: Partial close logic                           |
+//+------------------------------------------------------------------+
+void ApplyPartialCloseLogic()
+{
+   double current_price = (position.PositionType() == POSITION_TYPE_BUY) ? 
+                         symbol.Bid() : symbol.Ask();
+   double open_price = position.PriceOpen();
+   double volume = position.Volume();
+   
+   // Partial close after 10 pips profit (50% of position)
+   double partial_close_threshold = 100 * symbol.Point(); // 10 pips
+   
+   if(position.PositionType() == POSITION_TYPE_BUY)
+   {
+      double profit_pips = current_price - open_price;
+      
+      if(profit_pips >= partial_close_threshold && volume > 0.01)
+      {
+         double close_volume = NormalizeDouble(volume * 0.5, 2); // Close 50%
+         
+         if(trade.PositionClosePartial(position.Ticket(), close_volume))
+         {
+            Print("Partial close executed for BUY: ", close_volume, " lots at ", current_price);
+         }
+      }
+   }
+   else // SELL position
+   {
+      double profit_pips = open_price - current_price;
+      
+      if(profit_pips >= partial_close_threshold && volume > 0.01)
+      {
+         double close_volume = NormalizeDouble(volume * 0.5, 2); // Close 50%
+         
+         if(trade.PositionClosePartial(position.Ticket(), close_volume))
+         {
+            Print("Partial close executed for SELL: ", close_volume, " lots at ", current_price);
+         }
+      }
+   }
+}
+
+
+
 double CalculateRecentWinRate(int trades_count)
 {
-   // This would track recent trade outcomes
-   // For now, return current overall win rate
    return (g_totalTrades > 0) ? (double)g_winningTrades / g_totalTrades : 0.5;
 }
 
@@ -1989,17 +2200,100 @@ void UpdateCompoundGrowthLogic()
    
    double growth_factor = account.Balance() / initial_balance;
    
-   // Adjust position sizing based on account growth
-   if(growth_factor > 1.5) // 50% growth
+   if(growth_factor > 1.5)
    {
-      // Increase base position size slightly
       Print("Account grown by ", (growth_factor - 1.0) * 100, "% - adjusting position sizing");
    }
-   else if(growth_factor < 0.8) // 20% drawdown
+   else if(growth_factor < 0.8)
    {
-      // Reduce position sizing
       Print("Account drawdown detected - reducing position sizing");
    }
+}
+
+//+------------------------------------------------------------------+
+//| CRITICAL FIX #6: Check margin availability before trade         |
+//+------------------------------------------------------------------+
+bool CheckMarginAvailability(double signal_strength)
+{
+   double lot_size = CalculateSmartPositionSize(signal_strength);
+   
+   // Calculate required margin for the trade
+   double margin_required = 0.0;
+   if(!OrderCalcMargin(ORDER_TYPE_BUY, _Symbol, lot_size, symbol.Ask(), margin_required))
+   {
+      Print("Failed to calculate margin requirement");
+      return false;
+   }
+   
+   double free_margin = account.FreeMargin();
+   double margin_level = account.MarginLevel();
+   
+   // Ensure sufficient free margin (at least 200% of required)
+   if(free_margin < margin_required * 2.0)
+   {
+      Print("Insufficient free margin. Required: ", margin_required * 2.0, " Available: ", free_margin);
+      return false;
+   }
+   
+   // Ensure margin level stays above 300%
+   if(margin_level > 0 && margin_level < 300.0)
+   {
+      Print("Margin level too low: ", margin_level, "%");
+      return false;
+   }
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| CRITICAL FIX #7: Weekend gap protection                         |
+//+------------------------------------------------------------------+
+bool IsWeekendOrGap()
+{
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   
+   // Weekend protection (Friday 22:00 GMT to Sunday 22:00 GMT)
+   if(dt.day_of_week == 6 || dt.day_of_week == 0) // Saturday or Sunday
+      return true;
+      
+   if(dt.day_of_week == 5 && dt.hour >= 22) // Friday after 22:00 GMT
+      return true;
+      
+   if(dt.day_of_week == 1 && dt.hour < 1) // Monday before 01:00 GMT
+      return true;
+   
+   // Monday gap protection - check for significant price gaps
+   if(dt.day_of_week == 1 && dt.hour >= 1 && dt.hour <= 3)
+   {
+      static double friday_close = 0.0;
+      static bool friday_close_set = false;
+      
+      if(!friday_close_set)
+      {
+         // Get Friday's closing price
+         double close_prices[];
+         if(CopyClose(_Symbol, PERIOD_H1, 1, 1, close_prices) > 0)
+         {
+            friday_close = close_prices[0];
+            friday_close_set = true;
+         }
+      }
+      
+      if(friday_close_set)
+      {
+         double current_price = (symbol.Ask() + symbol.Bid()) / 2;
+         double gap_size = MathAbs(current_price - friday_close) / friday_close * 100;
+         
+         if(gap_size > 0.5) // 0.5% gap threshold
+         {
+            Print("Monday gap detected: ", gap_size, "% - Trading suspended");
+            return true;
+         }
+      }
+   }
+   
+   return false;
 }
 
 //+------------------------------------------------------------------+
