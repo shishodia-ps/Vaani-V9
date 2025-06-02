@@ -2491,14 +2491,146 @@ double GetEMAValue(ENUM_TIMEFRAMES timeframe, int period, int shift)
    return symbol.Bid();
 }
 
+//+------------------------------------------------------------------+
+//| Execute Hedging Strategy                                         |
+//+------------------------------------------------------------------+
+void ExecuteHedgingStrategy()
+{
+   if(PositionsTotal() == 0)
+   {
+      Print("No positions to hedge");
+      return;
+   }
+   
+   double total_volume = 0.0;
+   double net_volume = 0.0;
+   
+   // Calculate net exposure
+   for(int i = 0; i < PositionsTotal(); i++)
+   {
+      if(PositionSelectByTicket(PositionGetTicket(i)))
+      {
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol)
+         {
+            double volume = PositionGetDouble(POSITION_VOLUME);
+            total_volume += volume;
+            
+            if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
+               net_volume += volume;
+            else
+               net_volume -= volume;
+         }
+      }
+   }
+   
+   if(MathAbs(net_volume) < InpMinPositionSize)
+   {
+      Print("Net exposure too small to hedge: ", net_volume);
+      return;
+   }
+   
+   // Calculate hedge volume
+   double hedge_volume = MathAbs(net_volume) * InpHedgeRatio;
+   hedge_volume = NormalizeDouble(hedge_volume, 2);
+   
+   if(hedge_volume < InpMinPositionSize)
+   {
+      Print("Hedge volume too small: ", hedge_volume);
+      return;
+   }
+   
+   // Determine hedge direction (opposite to net exposure)
+   ENUM_ORDER_TYPE hedge_type = (net_volume > 0) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+   double price = (hedge_type == ORDER_TYPE_BUY) ? symbol.Ask() : symbol.Bid();
+   
+   // Execute hedge with different magic number
+   CTrade hedge_trade;
+   hedge_trade.SetExpertMagicNumber(InpMagicNumber + 100);
+   
+   string comment = StringFormat("Hedge[%.2f|%.2f]", net_volume, hedge_volume);
+   
+   if(hedge_trade.PositionOpen(_Symbol, hedge_type, hedge_volume, price, 0, 0, comment))
+   {
+      Print("Hedge executed: ", EnumToString(hedge_type), " ", hedge_volume, " lots");
+      Print("Net exposure before hedge: ", net_volume, " After hedge: ", net_volume - (hedge_type == ORDER_TYPE_BUY ? hedge_volume : -hedge_volume));
+   }
+   else
+   {
+      Print("Hedge execution failed: ", hedge_trade.ResultRetcode());
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Generate Volatility Profit Signal                               |
+//+------------------------------------------------------------------+
+double GenerateVolatilityProfitSignal()
+{
+   double atr = GetATRValue(PERIOD_M15, 0);
+   double current_atr = GetATRValue(PERIOD_M5, 0);
+   double volatility_ratio = (atr > 0) ? current_atr / atr : 1.0;
+   
+   // Enhanced volatility detection
+   if(volatility_ratio > InpVolatilitySpikeThreshold)
+   {
+      double rsi = GetRSIValue(PERIOD_M15, 0);
+      double price = symbol.Bid();
+      double bb_middle = GetBollingerValue(PERIOD_M15, 0, BASE_LINE);
+      
+      // Counter-trend signal during high volatility
+      if(price > bb_middle && rsi > 70)
+      {
+         Print("Volatility profit signal: SELL (overbought in high volatility)");
+         return -0.8;
+      }
+      else if(price < bb_middle && rsi < 30)
+      {
+         Print("Volatility profit signal: BUY (oversold in high volatility)");
+         return 0.8;
+      }
+      
+      // Moderate volatility trading
+      double volume_ratio = GetVolumeRatio();
+      if(volume_ratio > 1.5)
+      {
+         double momentum = (price - bb_middle) / bb_middle;
+         Print("Volatility profit signal: momentum-based (", momentum, ")");
+         return momentum * 0.6;
+      }
+   }
+   
+   return 0.0;
+}
+
+//+------------------------------------------------------------------+
+//| Get Volume Ratio                                                |
+//+------------------------------------------------------------------+
 double GetVolumeRatio()
 {
-   // Simplified volume ratio calculation
    long current_volume[];
    long avg_volume[];
    
    if(CopyTickVolume(_Symbol, PERIOD_M15, 0, 1, current_volume) > 0 &&
+      CopyTickVolume(_Symbol, PERIOD_M15, 1, 20, avg_volume) > 0)
+   {
+      if(ArraySize(current_volume) > 0 && ArraySize(avg_volume) > 0)
+      {
+         long total_avg = 0;
+         for(int i = 0; i < ArraySize(avg_volume); i++)
+            total_avg += avg_volume[i];
+         
+         double average_volume = (double)total_avg / ArraySize(avg_volume);
+         
+         if(average_volume > 0)
+            return (double)current_volume[0] / average_volume;
+      }
+   }
+   
+   return 1.0;
+}
 
+//+------------------------------------------------------------------+
+//| Check Weekend or Gap Conditions                                 |
+//+------------------------------------------------------------------+
 bool IsWeekendOrGap()
 {
    MqlDateTime dt;
