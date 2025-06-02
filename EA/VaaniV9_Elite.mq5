@@ -250,6 +250,8 @@ input int      InpRetrainingFrequency = 50;       // Retrain every N trades
 input double   InpMLConfidenceThreshold = 0.7;    // ML prediction confidence threshold
 input bool     InpSaveMLModels = true;            // Save/load ML models
 input bool     InpBreakEvenMode = true;        // Enable break-even
+input bool     InpPartialCloseMode = true;        // Enable partial close mode
+input double   InpPartialCloseLevel = 30.0;       // Partial close trigger level (pips)
 
 input group "=== Multi-Timeframe Analysis ==="
 input ENUM_TIMEFRAMES InpTF1 = PERIOD_M15;     // Primary timeframe
