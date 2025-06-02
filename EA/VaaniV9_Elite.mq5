@@ -17,6 +17,199 @@
 #include <Indicators\Indicators.mqh>
 
 //+------------------------------------------------------------------+
+//| Probabilistic Neural Network Class - Integrated from CodeBase   |
+//+------------------------------------------------------------------+
+class CNetPNN
+{
+private:
+   int               m_inp;
+   int               m_out;
+   double            m_sigma;
+   int               m_patterns;
+   double            m_inp_data[];
+   double            m_out_data[];
+   double            m_weights[];
+   
+public:
+   double            mse;
+   
+                     CNetPNN(int inp, int out);
+                    ~CNetPNN();
+   void              Learn(int patterns, double &inp_data[], double &out_data[], int epochs, double target_mse);
+   int               Calculate(double &input[]);
+   void              Save(int file_handle);
+   void              Load(int file_handle);
+   
+private:
+   double            GaussianKernel(double distance);
+   double            EuclideanDistance(double &x1[], double &x2[], int size);
+};
+
+CNetPNN::CNetPNN(int inp, int out)
+{
+   m_inp = inp;
+   m_out = out;
+   m_sigma = 1.0;
+   m_patterns = 0;
+   mse = 0.0;
+   ArrayResize(m_inp_data, 0);
+   ArrayResize(m_out_data, 0);
+   ArrayResize(m_weights, 0);
+}
+
+CNetPNN::~CNetPNN()
+{
+   ArrayFree(m_inp_data);
+   ArrayFree(m_out_data);
+   ArrayFree(m_weights);
+}
+
+void CNetPNN::Learn(int patterns, double &inp_data[], double &out_data[], int epochs, double target_mse)
+{
+   m_patterns = patterns;
+   ArrayResize(m_inp_data, patterns * m_inp);
+   ArrayResize(m_out_data, patterns * m_out);
+   ArrayResize(m_weights, patterns);
+   
+   for(int i = 0; i < patterns * m_inp; i++)
+      m_inp_data[i] = inp_data[i];
+   
+   for(int i = 0; i < patterns * m_out; i++)
+      m_out_data[i] = out_data[i];
+   
+   for(int i = 0; i < patterns; i++)
+      m_weights[i] = 1.0 / patterns;
+   
+   double best_sigma = 1.0;
+   double best_mse = 1000000.0;
+   
+   for(double sigma = 0.1; sigma <= 2.0; sigma += 0.1)
+   {
+      m_sigma = sigma;
+      double current_mse = 0.0;
+      
+      for(int p = 0; p < patterns; p++)
+      {
+         double test_input[];
+         ArrayResize(test_input, m_inp);
+         
+         for(int j = 0; j < m_inp; j++)
+            test_input[j] = m_inp_data[p * m_inp + j];
+         
+         int predicted = Calculate(test_input);
+         int actual = (int)m_out_data[p];
+         
+         if(predicted != actual)
+            current_mse += 1.0;
+      }
+      
+      current_mse /= patterns;
+      
+      if(current_mse < best_mse)
+      {
+         best_mse = current_mse;
+         best_sigma = sigma;
+      }
+   }
+   
+   m_sigma = best_sigma;
+   mse = best_mse;
+}
+
+int CNetPNN::Calculate(double &input[])
+{
+   if(m_patterns == 0) return 0;
+   
+   double class_sums[];
+   ArrayResize(class_sums, m_out);
+   ArrayInitialize(class_sums, 0.0);
+   
+   for(int p = 0; p < m_patterns; p++)
+   {
+      double pattern_input[];
+      ArrayResize(pattern_input, m_inp);
+      
+      for(int j = 0; j < m_inp; j++)
+         pattern_input[j] = m_inp_data[p * m_inp + j];
+      
+      double distance = EuclideanDistance(input, pattern_input, m_inp);
+      double activation = GaussianKernel(distance);
+      
+      int class_index = (int)m_out_data[p];
+      if(class_index >= 0 && class_index < m_out)
+         class_sums[class_index] += activation * m_weights[p];
+   }
+   
+   int max_class = 0;
+   double max_sum = class_sums[0];
+   
+   for(int i = 1; i < m_out; i++)
+   {
+      if(class_sums[i] > max_sum)
+      {
+         max_sum = class_sums[i];
+         max_class = i;
+      }
+   }
+   
+   return max_class;
+}
+
+double CNetPNN::GaussianKernel(double distance)
+{
+   return MathExp(-(distance * distance) / (2.0 * m_sigma * m_sigma));
+}
+
+double CNetPNN::EuclideanDistance(double &x1[], double &x2[], int size)
+{
+   double sum = 0.0;
+   for(int i = 0; i < size; i++)
+   {
+      double diff = x1[i] - x2[i];
+      sum += diff * diff;
+   }
+   return MathSqrt(sum);
+}
+
+void CNetPNN::Save(int file_handle)
+{
+   FileWriteInteger(file_handle, m_inp);
+   FileWriteInteger(file_handle, m_out);
+   FileWriteDouble(file_handle, m_sigma);
+   FileWriteInteger(file_handle, m_patterns);
+   
+   for(int i = 0; i < ArraySize(m_inp_data); i++)
+      FileWriteDouble(file_handle, m_inp_data[i]);
+   
+   for(int i = 0; i < ArraySize(m_out_data); i++)
+      FileWriteDouble(file_handle, m_out_data[i]);
+   
+   for(int i = 0; i < ArraySize(m_weights); i++)
+      FileWriteDouble(file_handle, m_weights[i]);
+}
+
+void CNetPNN::Load(int file_handle)
+{
+   m_inp = FileReadInteger(file_handle);
+   m_out = FileReadInteger(file_handle);
+   m_sigma = FileReadDouble(file_handle);
+   m_patterns = FileReadInteger(file_handle);
+   
+   ArrayResize(m_inp_data, m_patterns * m_inp);
+   ArrayResize(m_out_data, m_patterns * m_out);
+   ArrayResize(m_weights, m_patterns);
+   
+   for(int i = 0; i < ArraySize(m_inp_data); i++)
+      m_inp_data[i] = FileReadDouble(file_handle);
+   
+   for(int i = 0; i < ArraySize(m_out_data); i++)
+      m_out_data[i] = FileReadDouble(file_handle);
+   
+   for(int i = 0; i < ArraySize(m_weights); i++)
+      m_weights[i] = FileReadDouble(file_handle);
+}
+
+//+------------------------------------------------------------------+
 //| Input Parameters - Elite EA Configuration                        |
 //+------------------------------------------------------------------+
 input group "=== VaaniV9 Elite Strategy Settings ==="
@@ -48,6 +241,14 @@ input bool     InpUseTrailingStop = true;      // Use trailing stop
 input double   InpTrailingStart = 300;         // Trailing start (points)
 input double   InpTrailingStep = 50;           // Trailing step (points)
 input double   InpMaxDrawdownPercent = 15.0;   // Max drawdown (%)
+
+input group "=== AI & Machine Learning ==="
+input string   InpOpenAIApiKey = "";              // OpenAI API Key
+input bool     InpEnableAIAnalysis = true;        // Enable AI market analysis
+input bool     InpEnableAdaptiveLearning = true;  // Enable adaptive learning
+input int      InpRetrainingFrequency = 50;       // Retrain every N trades
+input double   InpMLConfidenceThreshold = 0.7;    // ML prediction confidence threshold
+input bool     InpSaveMLModels = true;            // Save/load ML models
 input bool     InpBreakEvenMode = true;        // Enable break-even
 
 input group "=== Multi-Timeframe Analysis ==="
@@ -137,6 +338,30 @@ double         g_mlSignalStrength = 0.0;
 double         g_mlRiskLevel = 0.5;
 bool           g_mlModelsLoaded = false;
 
+// Neural Network instances
+CNetPNN*       g_trendPNN = NULL;
+CNetPNN*       g_volatilityPNN = NULL;
+CNetPNN*       g_riskPNN = NULL;
+
+// OpenAI API Integration
+string         g_openaiApiKey = "";
+string         g_lastAIAnalysis = "";
+datetime       g_lastAICall = 0;
+double         g_aiMarketBias = 0.0;
+double         g_aiConfidence = 0.0;
+
+// Adaptive Learning System
+struct TradeResult
+{
+   double features[10];
+   int actual_outcome;
+   double profit_pips;
+   datetime trade_time;
+};
+
+TradeResult    g_tradeHistory[1000];
+int            g_tradeHistoryCount = 0;
+
 // Multi-timeframe indicators
 int            g_handleRSI_M15, g_handleRSI_H1, g_handleRSI_H4, g_handleRSI_D1;
 int            g_handleMACD_M15, g_handleMACD_H1, g_handleMACD_H4;
@@ -196,6 +421,29 @@ void OnDeinit(const int reason)
 {
    Print("VaaniV9 Elite EA - Shutting down");
    
+   // Save ML models before shutdown
+   if(InpSaveMLModels && g_mlModelsLoaded)
+      SaveMLModels();
+   
+   // Clean up neural networks
+   if(g_trendPNN != NULL)
+   {
+      delete g_trendPNN;
+      g_trendPNN = NULL;
+   }
+   
+   if(g_volatilityPNN != NULL)
+   {
+      delete g_volatilityPNN;
+      g_volatilityPNN = NULL;
+   }
+   
+   if(g_riskPNN != NULL)
+   {
+      delete g_riskPNN;
+      g_riskPNN = NULL;
+   }
+   
    // Save performance data
    SavePerformanceData();
    
@@ -208,6 +456,7 @@ void OnDeinit(const int reason)
    Print("Total Profit: ", g_totalProfit);
    Print("Sharpe Ratio: ", g_sharpeRatio);
    Print("Max Drawdown: ", g_currentDrawdown, "%");
+   Print("VaaniV9 Elite EA - Deinitialization completed");
 }
 
 //+------------------------------------------------------------------+
@@ -373,11 +622,19 @@ void InitializeMLModels()
 {
    if(InpMLEnhanced)
    {
-      // Simulate ML model loading
+      g_trendPNN = new CNetPNN(10, 2);
+      g_volatilityPNN = new CNetPNN(10, 3);
+      g_riskPNN = new CNetPNN(10, 2);
+      
+      if(InpSaveMLModels)
+         LoadMLModels();
+      
+      g_openaiApiKey = InpOpenAIApiKey;
+      
       g_mlModelsLoaded = true;
       g_mlSignalStrength = 0.0;
       g_mlRiskLevel = 0.5;
-      Print("ML Models initialized - Enhanced signal processing enabled");
+      Print("ML Models initialized - Neural networks and AI analysis enabled");
    }
 }
 
@@ -565,39 +822,661 @@ void SelectOptimalStrategy()
 }
 
 //+------------------------------------------------------------------+
-//| Update ML Predictions                                            |
+//| Update ML Predictions - Enhanced with Real Neural Networks      |
 //+------------------------------------------------------------------+
 void UpdateMLPredictions()
 {
    if(!g_mlModelsLoaded)
       return;
    
-   // Simulate ML signal prediction
-   double rsi_m15 = GetRSIValue(PERIOD_M15, 0);
-   double macd_main = GetMACDValue(PERIOD_M15, 0, MODE_MAIN);
-   double atr_ratio = GetATRValue(PERIOD_M15, 0) / GetATRAverage(PERIOD_M15, 20);
+   double features[10];
+   ExtractCurrentFeatures(features);
    
-   // Simple ML simulation based on technical indicators
-   double signal_strength = 0.0;
+   // Normalize features for better neural network performance
+   NormalizeFeatures(features);
    
-   // Trend strength component
-   if(rsi_m15 > 70)
-      signal_strength -= 0.3;
-   else if(rsi_m15 < 30)
-      signal_strength += 0.3;
-   
-   // Momentum component
-   if(macd_main > 0)
-      signal_strength += 0.2;
+   if(g_trendPNN != NULL && g_volatilityPNN != NULL && g_riskPNN != NULL)
+   {
+      // Get neural network predictions with confidence scoring
+      int trend_signal = g_trendPNN.Calculate(features);
+      int volatility_signal = g_volatilityPNN.Calculate(features);
+      int risk_signal = g_riskPNN.Calculate(features);
+      
+      // Calculate prediction confidence based on neural network MSE
+      double trend_confidence = MathMax(0.1, 1.0 - g_trendPNN.mse);
+      double volatility_confidence = MathMax(0.1, 1.0 - g_volatilityPNN.mse);
+      double risk_confidence = MathMax(0.1, 1.0 - g_riskPNN.mse);
+      
+      // Weighted ensemble prediction with confidence weighting
+      double weighted_trend = (trend_signal / 100.0) * trend_confidence;
+      double weighted_volatility = (volatility_signal / 100.0) * volatility_confidence;
+      double weighted_risk = (risk_signal / 100.0) * risk_confidence;
+      
+      double total_confidence = trend_confidence + volatility_confidence + risk_confidence;
+      
+      g_mlSignalStrength = (weighted_trend * 0.5 + weighted_volatility * 0.3 + weighted_risk * 0.2) / (total_confidence / 3.0);
+      g_mlRiskLevel = MathMax(0.1, MathMin(0.9, weighted_risk));
+      
+      // Advanced pattern recognition using multi-timeframe analysis
+      double pattern_strength = AnalyzeAdvancedPatterns(features);
+      g_mlSignalStrength = (g_mlSignalStrength * 0.7) + (pattern_strength * 0.3);
+      
+      // Market regime detection for adaptive strategy selection
+      DetectMarketRegime(features);
+      
+      UpdateMLModelPerformance();
+      
+      // Log detailed ML analysis
+      if(g_mlSignalStrength > InpMLConfidenceThreshold)
+         Print("ML Analysis: Strong signal (", DoubleToString(g_mlSignalStrength, 3), 
+               ") | Trend: ", trend_signal, " | Vol: ", volatility_signal, 
+               " | Risk: ", risk_signal, " | Regime: ", EnumToString(g_currentRegime));
+   }
    else
-      signal_strength -= 0.2;
+   {
+      // Fallback to enhanced rule-based analysis if neural networks not available
+      double signal_strength = CalculateEnhancedRuleBasedSignal(features);
+      g_mlSignalStrength = MathMax(-1.0, MathMin(1.0, signal_strength));
+      g_mlRiskLevel = CalculateRiskLevel(features);
+   }
    
-   // Volatility component
-   if(atr_ratio > 1.5)
-      signal_strength *= 0.7; // Reduce signal in high volatility
+   // Integrate AI market analysis for additional insights
+   if(InpEnableAIAnalysis)
+      UpdateAIMarketAnalysis();
    
-   g_mlSignalStrength = MathMax(-1.0, MathMin(1.0, signal_strength));
-   g_mlRiskLevel = MathMax(0.1, MathMin(0.9, atr_ratio * 0.5));
+   // Enhanced signal reporting with confidence levels
+   if(MathAbs(g_mlSignalStrength) > InpMLConfidenceThreshold)
+   {
+      string signal_type = g_mlSignalStrength > 0 ? "BULLISH" : "BEARISH";
+      Print("ML SIGNAL: ", signal_type, " | Strength: ", DoubleToString(g_mlSignalStrength, 3), 
+            " | Risk: ", DoubleToString(g_mlRiskLevel, 3), " | AI Bias: ", DoubleToString(g_aiMarketBias, 2));
+   }
+
+//+------------------------------------------------------------------+
+//| Enhanced Feature Extraction for Advanced ML Models             |
+//+------------------------------------------------------------------+
+void ExtractCurrentFeatures(double &features[])
+{
+   // Multi-timeframe technical indicators
+   features[0] = GetRSIValue(PERIOD_M15, 0) / 100.0;                    // RSI normalized
+   features[1] = GetMACDValue(PERIOD_M15, 0, MODE_MAIN) * 10000;        // MACD scaled
+   features[2] = GetATRValue(PERIOD_M15, 0) / GetATRAverage(PERIOD_M15, 20); // ATR ratio
+   features[3] = (iClose(_Symbol, PERIOD_M15, 0) - iClose(_Symbol, PERIOD_M15, 20)) / iClose(_Symbol, PERIOD_M15, 20); // Price momentum
+   features[4] = GetBollingerPosition(PERIOD_M15, 0);                   // BB position
+   features[5] = GetVolumeRatio(PERIOD_M15, 0);                         // Volume ratio
+   features[6] = GetPriceVelocity(PERIOD_M15, 0);                       // Price velocity
+   features[7] = GetMarketVolatility(PERIOD_M15, 0);                    // Volatility
+   features[8] = GetTrendStrength(PERIOD_M15, 0);                       // Trend strength
+   features[9] = GetMomentumIndicator(PERIOD_M15, 0);                   // Momentum
+}
+
+//+------------------------------------------------------------------+
+//| Normalize Features for Neural Network Input                     |
+//+------------------------------------------------------------------+
+void NormalizeFeatures(double &features[])
+{
+   // Apply min-max normalization to ensure all features are in [0,1] range
+   for(int i = 0; i < ArraySize(features); i++)
+   {
+      if(features[i] > 1.0) features[i] = 1.0;
+      if(features[i] < -1.0) features[i] = -1.0;
+      features[i] = (features[i] + 1.0) / 2.0; // Convert [-1,1] to [0,1]
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Advanced Pattern Recognition Analysis                           |
+//+------------------------------------------------------------------+
+double AnalyzeAdvancedPatterns(double &features[])
+{
+   double pattern_strength = 0.0;
+   
+   // Divergence pattern detection
+   double rsi_divergence = DetectRSIDivergence();
+   double macd_divergence = DetectMACDDivergence();
+   
+   // Support/Resistance pattern analysis
+   double sr_strength = AnalyzeSupportResistance();
+   
+   // Harmonic pattern detection
+   double harmonic_pattern = DetectHarmonicPatterns();
+   
+   // Fibonacci retracement analysis
+   double fib_level = AnalyzeFibonacciLevels();
+   
+   // Combine pattern signals with weighted importance
+   pattern_strength = (rsi_divergence * 0.25) + (macd_divergence * 0.25) + 
+                     (sr_strength * 0.20) + (harmonic_pattern * 0.15) + 
+                     (fib_level * 0.15);
+   
+   return MathMax(-1.0, MathMin(1.0, pattern_strength));
+}
+
+//+------------------------------------------------------------------+
+//| Market Regime Detection for Adaptive Strategy Selection        |
+//+------------------------------------------------------------------+
+void DetectMarketRegime(double &features[])
+{
+   double volatility = features[7];
+   double trend_strength = features[8];
+   double momentum = features[9];
+   
+   // Crisis detection based on extreme volatility
+   if(volatility > InpVolatilitySpikeThreshold)
+   {
+      g_currentRegime = REGIME_CRISIS;
+      g_activeStrategy = STRATEGY_CRISIS_PROFIT;
+   }
+   // High volatility regime
+   else if(volatility > 2.0)
+   {
+      g_currentRegime = REGIME_HIGH_VOLATILITY;
+      g_activeStrategy = STRATEGY_VOLATILITY;
+   }
+   // Strong trending market
+   else if(MathAbs(trend_strength) > 0.7)
+   {
+      if(trend_strength > 0)
+         g_currentRegime = REGIME_TRENDING_UP;
+      else
+         g_currentRegime = REGIME_TRENDING_DOWN;
+      g_activeStrategy = STRATEGY_TREND_FOLLOWING;
+   }
+   // Ranging market
+   else if(MathAbs(momentum) < 0.3 && volatility < 1.0)
+   {
+      g_currentRegime = REGIME_RANGING;
+      g_activeStrategy = STRATEGY_MEAN_REVERSION;
+   }
+   // News-driven market (high momentum, moderate volatility)
+   else if(MathAbs(momentum) > 0.6)
+   {
+      g_currentRegime = REGIME_NEWS_DRIVEN;
+      g_activeStrategy = STRATEGY_NEWS_REACTION;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Enhanced Rule-Based Signal Calculation                         |
+//+------------------------------------------------------------------+
+double CalculateEnhancedRuleBasedSignal(double &features[])
+{
+   double signal = 0.0;
+   
+   double rsi = features[0] * 100;
+   double macd = features[1];
+   double atr_ratio = features[2];
+   double momentum = features[3];
+   double bb_position = features[4];
+   
+   // RSI analysis with dynamic thresholds
+   double rsi_oversold = 30 - (atr_ratio * 10); // Dynamic threshold based on volatility
+   double rsi_overbought = 70 + (atr_ratio * 10);
+   
+   if(rsi < rsi_oversold) signal += 0.4;
+   else if(rsi > rsi_overbought) signal -= 0.4;
+   
+   // MACD signal analysis
+   if(macd > 0) signal += 0.3;
+   else signal -= 0.3;
+   
+   // Momentum analysis
+   signal += momentum * 0.5;
+   
+   // Bollinger Bands position
+   if(bb_position < 0.2) signal += 0.2; // Near lower band
+   else if(bb_position > 0.8) signal -= 0.2; // Near upper band
+   
+   // Volatility adjustment
+   if(atr_ratio > 2.0) signal *= 0.6; // Reduce signal strength in high volatility
+   
+   return signal;
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Risk Level Based on Market Conditions                |
+//+------------------------------------------------------------------+
+double CalculateRiskLevel(double &features[])
+{
+   double volatility = features[7];
+   double atr_ratio = features[2];
+   double trend_strength = features[8];
+   
+   double base_risk = 0.5;
+   
+   // Increase risk in high volatility
+   if(volatility > 2.0) base_risk += 0.3;
+   else if(volatility > 1.5) base_risk += 0.2;
+   
+   // Adjust for ATR ratio
+   base_risk += (atr_ratio - 1.0) * 0.2;
+   
+   // Reduce risk in strong trends
+   if(MathAbs(trend_strength) > 0.7) base_risk -= 0.1;
+   
+   return MathMax(0.1, MathMin(0.9, base_risk));
+}
+
+//+------------------------------------------------------------------+
+//| Advanced Pattern Detection Functions                            |
+//+------------------------------------------------------------------+
+double DetectRSIDivergence()
+{
+   double rsi_current = GetRSIValue(PERIOD_M15, 0);
+   double rsi_prev = GetRSIValue(PERIOD_M15, 5);
+   double price_current = iClose(_Symbol, PERIOD_M15, 0);
+   double price_prev = iClose(_Symbol, PERIOD_M15, 5);
+   
+   // Bullish divergence: price makes lower low, RSI makes higher low
+   if(price_current < price_prev && rsi_current > rsi_prev && rsi_current < 40)
+      return 0.8;
+   
+   // Bearish divergence: price makes higher high, RSI makes lower high
+   if(price_current > price_prev && rsi_current < rsi_prev && rsi_current > 60)
+      return -0.8;
+   
+   return 0.0;
+}
+
+double DetectMACDDivergence()
+{
+   double macd_current = GetMACDValue(PERIOD_M15, 0, MODE_MAIN);
+   double macd_prev = GetMACDValue(PERIOD_M15, 5, MODE_MAIN);
+   double price_current = iClose(_Symbol, PERIOD_M15, 0);
+   double price_prev = iClose(_Symbol, PERIOD_M15, 5);
+   
+   // Bullish divergence
+   if(price_current < price_prev && macd_current > macd_prev && macd_current < 0)
+      return 0.7;
+   
+   // Bearish divergence
+   if(price_current > price_prev && macd_current < macd_prev && macd_current > 0)
+      return -0.7;
+   
+   return 0.0;
+}
+
+double AnalyzeSupportResistance()
+{
+   double current_price = iClose(_Symbol, PERIOD_M15, 0);
+   double high_20 = iHigh(_Symbol, PERIOD_M15, iHighest(_Symbol, PERIOD_M15, MODE_HIGH, 20, 0));
+   double low_20 = iLow(_Symbol, PERIOD_M15, iLowest(_Symbol, PERIOD_M15, MODE_LOW, 20, 0));
+   
+   double range = high_20 - low_20;
+   double position = (current_price - low_20) / range;
+   
+   // Near support (oversold)
+   if(position < 0.2) return 0.6;
+   
+   // Near resistance (overbought)
+   if(position > 0.8) return -0.6;
+   
+   return 0.0;
+}
+
+double DetectHarmonicPatterns()
+{
+   // Simplified harmonic pattern detection using Fibonacci ratios
+   double prices[5];
+   for(int i = 0; i < 5; i++)
+      prices[i] = iClose(_Symbol, PERIOD_M15, i * 4);
+   
+   // Calculate ratios
+   double ab = MathAbs(prices[1] - prices[0]);
+   double bc = MathAbs(prices[2] - prices[1]);
+   double cd = MathAbs(prices[3] - prices[2]);
+   
+   if(ab > 0 && bc > 0)
+   {
+      double bc_ab_ratio = bc / ab;
+      double cd_bc_ratio = cd / bc;
+      
+      // Gartley pattern ratios (0.618, 0.786)
+      if(MathAbs(bc_ab_ratio - 0.618) < 0.05 && MathAbs(cd_bc_ratio - 0.786) < 0.05)
+         return prices[0] > prices[4] ? 0.5 : -0.5;
+   }
+   
+   return 0.0;
+}
+
+double AnalyzeFibonacciLevels()
+{
+   double high = iHigh(_Symbol, PERIOD_M15, iHighest(_Symbol, PERIOD_M15, MODE_HIGH, 50, 0));
+   double low = iLow(_Symbol, PERIOD_M15, iLowest(_Symbol, PERIOD_M15, MODE_LOW, 50, 0));
+   double current = iClose(_Symbol, PERIOD_M15, 0);
+   
+   double range = high - low;
+   double fib_618 = high - (range * 0.618);
+   double fib_382 = high - (range * 0.382);
+   double fib_236 = high - (range * 0.236);
+   
+   // Check proximity to key Fibonacci levels
+   double tolerance = range * 0.02; // 2% tolerance
+   
+   if(MathAbs(current - fib_618) < tolerance) return current < fib_618 ? 0.7 : -0.7;
+   if(MathAbs(current - fib_382) < tolerance) return current < fib_382 ? 0.5 : -0.5;
+   if(MathAbs(current - fib_236) < tolerance) return current < fib_236 ? 0.3 : -0.3;
+   
+   return 0.0;
+}
+
+double GetBollingerPosition(ENUM_TIMEFRAMES timeframe, int shift)
+{
+   double upper = iBands(_Symbol, timeframe, 20, 0, 2.0, PRICE_CLOSE)[shift];
+   double lower = iBands(_Symbol, timeframe, 20, 0, 2.0, PRICE_CLOSE)[shift];
+   double close = iClose(_Symbol, timeframe, shift);
+   
+   if(upper == lower) return 0.5;
+   return (close - lower) / (upper - lower);
+}
+
+double GetVolumeRatio(ENUM_TIMEFRAMES timeframe, int shift)
+{
+   long current_volume = iVolume(_Symbol, timeframe, shift);
+   long avg_volume = 0;
+   
+   for(int i = 1; i <= 20; i++)
+      avg_volume += iVolume(_Symbol, timeframe, shift + i);
+   
+   avg_volume /= 20;
+   
+   if(avg_volume == 0) return 1.0;
+   return (double)current_volume / avg_volume;
+}
+
+double GetPriceVelocity(ENUM_TIMEFRAMES timeframe, int shift)
+{
+   double price_now = iClose(_Symbol, timeframe, shift);
+   double price_prev = iClose(_Symbol, timeframe, shift + 5);
+   
+   if(price_prev == 0) return 0.0;
+   return (price_now - price_prev) / price_prev;
+}
+
+double GetMarketVolatility(ENUM_TIMEFRAMES timeframe, int shift)
+{
+   double sum = 0.0;
+   double mean = 0.0;
+   
+   for(int i = 0; i < 20; i++)
+   {
+      double price = iClose(_Symbol, timeframe, shift + i);
+      mean += price;
+   }
+   mean /= 20.0;
+   
+   for(int i = 0; i < 20; i++)
+   {
+      double price = iClose(_Symbol, timeframe, shift + i);
+      sum += MathPow(price - mean, 2);
+   }
+   
+   return MathSqrt(sum / 20.0) / mean;
+}
+
+double GetTrendStrength(ENUM_TIMEFRAMES timeframe, int shift)
+{
+   double ma_fast = iMA(_Symbol, timeframe, 10, 0, MODE_SMA, PRICE_CLOSE, shift);
+   double ma_slow = iMA(_Symbol, timeframe, 50, 0, MODE_SMA, PRICE_CLOSE, shift);
+   
+   if(ma_slow == 0) return 0.0;
+   return (ma_fast - ma_slow) / ma_slow;
+}
+
+double GetMomentumIndicator(ENUM_TIMEFRAMES timeframe, int shift)
+{
+   double price_now = iClose(_Symbol, timeframe, shift);
+   double price_prev = iClose(_Symbol, timeframe, shift + 10);
+   
+   if(price_prev == 0) return 0.0;
+   return (price_now - price_prev) / price_prev;
+}
+
+//+------------------------------------------------------------------+
+//| OpenAI API Integration                                           |
+//+------------------------------------------------------------------+
+bool CallOpenAIAPI(string prompt, string &response)
+{
+   if(g_openaiApiKey == "" || TimeCurrent() - g_lastAICall < 300)
+      return false;
+      
+   string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + g_openaiApiKey + "\r\n";
+   string json_data = "{\"model\":\"gpt-4\",\"messages\":[{\"role\":\"user\",\"content\":\"" + prompt + "\"}],\"max_tokens\":200,\"temperature\":0.3}";
+   
+   char post_data[];
+   StringToCharArray(json_data, post_data, 0, StringLen(json_data));
+   
+   char result[];
+   string result_headers;
+   int timeout = 10000;
+   
+   int res = WebRequest("POST", "https://api.openai.com/v1/chat/completions", headers, timeout, post_data, result, result_headers);
+   
+   if(res == 200)
+   {
+      response = CharArrayToString(result);
+      g_lastAICall = TimeCurrent();
+      return true;
+   }
+   
+   return false;
+}
+
+void UpdateAIMarketAnalysis()
+{
+   if(TimeCurrent() - g_lastAICall < 1800)
+      return;
+      
+   string market_data = StringFormat("EURUSD: Price=%.5f, RSI=%.2f, MACD=%.5f, ATR=%.5f, Trend=%s, Volatility=%.2f%%. Analyze market conditions and provide trading bias (bullish/bearish/neutral) with confidence level.",
+                                   iClose(_Symbol, PERIOD_M15, 0),
+                                   GetRSIValue(PERIOD_M15, 0),
+                                   GetMACDValue(PERIOD_M15, 0, MODE_MAIN),
+                                   GetATRValue(PERIOD_M15, 0),
+                                   GetTrendDirection(),
+                                   GetMarketVolatility(PERIOD_M15, 0) * 100);
+   
+   string ai_response;
+   if(CallOpenAIAPI(market_data, ai_response))
+   {
+      g_lastAIAnalysis = ai_response;
+      ParseAIResponse(ai_response);
+   }
+}
+
+void ParseAIResponse(string response)
+{
+   if(StringFind(response, "bullish") >= 0)
+      g_aiMarketBias = 1.0;
+   else if(StringFind(response, "bearish") >= 0)
+      g_aiMarketBias = -1.0;
+   else
+      g_aiMarketBias = 0.0;
+   
+   if(StringFind(response, "high confidence") >= 0)
+      g_aiConfidence = 0.9;
+   else if(StringFind(response, "medium confidence") >= 0)
+      g_aiConfidence = 0.7;
+   else if(StringFind(response, "low confidence") >= 0)
+      g_aiConfidence = 0.5;
+   else
+      g_aiConfidence = 0.6;
+}
+
+string GetTrendDirection()
+{
+   double ma_fast = iMA(_Symbol, PERIOD_M15, 10, 0, MODE_SMA, PRICE_CLOSE, 0);
+   double ma_slow = iMA(_Symbol, PERIOD_M15, 50, 0, MODE_SMA, PRICE_CLOSE, 0);
+   
+   if(ma_fast > ma_slow)
+      return "Uptrend";
+   else if(ma_fast < ma_slow)
+      return "Downtrend";
+   else
+      return "Sideways";
+}
+
+//+------------------------------------------------------------------+
+//| Adaptive Learning System                                         |
+//+------------------------------------------------------------------+
+void RecordTradeOutcome(double profit_pips)
+{
+   if(!InpEnableAdaptiveLearning)
+      return;
+      
+   if(g_tradeHistoryCount >= 1000)
+   {
+      for(int i = 0; i < 999; i++)
+         g_tradeHistory[i] = g_tradeHistory[i+1];
+      g_tradeHistoryCount = 999;
+   }
+   
+   TradeResult result;
+   ExtractCurrentFeatures(result.features);
+   result.actual_outcome = profit_pips > 0 ? 1 : 0;
+   result.profit_pips = profit_pips;
+   result.trade_time = TimeCurrent();
+   
+   g_tradeHistory[g_tradeHistoryCount] = result;
+   g_tradeHistoryCount++;
+   
+   if(g_tradeHistoryCount % InpRetrainingFrequency == 0)
+      RetrainNeuralNetworks();
+}
+
+void RetrainNeuralNetworks()
+{
+   if(g_tradeHistoryCount < 100 || g_trendPNN == NULL)
+      return;
+   
+   double inputs[];
+   double outputs_trend[];
+   double outputs_volatility[];
+   double outputs_risk[];
+   int data_size = MathMin(g_tradeHistoryCount, 500);
+   
+   ArrayResize(inputs, data_size * 10);
+   ArrayResize(outputs_trend, data_size);
+   ArrayResize(outputs_volatility, data_size);
+   ArrayResize(outputs_risk, data_size);
+   
+   // Prepare training data with different target variables for each network
+   for(int i = 0; i < data_size; i++)
+   {
+      TradeResult trade = g_tradeHistory[g_tradeHistoryCount - data_size + i];
+      
+      // Extract features
+      for(int j = 0; j < 10; j++)
+         inputs[i*10 + j] = trade.features[j];
+      
+      // Trend prediction target (profit > 5 pips = strong trend)
+      outputs_trend[i] = trade.profit_pips > 5.0 ? 100 : (trade.profit_pips < -5.0 ? 0 : 50);
+      
+      // Volatility prediction target (based on profit magnitude)
+      double profit_magnitude = MathAbs(trade.profit_pips);
+      if(profit_magnitude > 20.0) outputs_volatility[i] = 200; // High volatility
+      else if(profit_magnitude > 10.0) outputs_volatility[i] = 100; // Medium volatility
+      else outputs_volatility[i] = 50; // Low volatility
+      
+      // Risk prediction target (loss > 10 pips = high risk)
+      outputs_risk[i] = trade.profit_pips < -10.0 ? 100 : (trade.profit_pips > 0 ? 0 : 50);
+   }
+   
+   // Train each neural network with specialized targets
+   g_trendPNN.Learn(data_size, inputs, outputs_trend, 100, 1e-6);
+   g_volatilityPNN.Learn(data_size, inputs, outputs_volatility, 100, 1e-6);
+   g_riskPNN.Learn(data_size, inputs, outputs_risk, 100, 1e-6);
+   
+   if(InpSaveMLModels)
+      SaveMLModels();
+   
+   Print("Neural networks retrained with ", data_size, " samples. MSE: ", g_trendPNN.mse);
+}
+
+void UpdateMLModelPerformance()
+{
+   static datetime last_update = 0;
+   
+   if(TimeCurrent() - last_update < 3600)
+      return;
+   
+   last_update = TimeCurrent();
+   
+   if(g_tradeHistoryCount > 10)
+   {
+      int correct_predictions = 0;
+      int total_predictions = MathMin(g_tradeHistoryCount, 100);
+      
+      for(int i = g_tradeHistoryCount - total_predictions; i < g_tradeHistoryCount; i++)
+      {
+         if(i < 0) continue;
+         
+         int predicted = g_trendPNN.Calculate(g_tradeHistory[i].features);
+         int actual = g_tradeHistory[i].actual_outcome;
+         
+         if(predicted == actual)
+            correct_predictions++;
+      }
+      
+      double accuracy = (double)correct_predictions / total_predictions;
+      Print("ML Model Accuracy: ", DoubleToString(accuracy * 100, 2), "% (", correct_predictions, "/", total_predictions, ")");
+   }
+}
+
+void SaveMLModels()
+{
+   if(g_trendPNN == NULL) return;
+   
+   int handle = FileOpen("VaaniV9_TrendPNN.dat", FILE_BIN|FILE_WRITE);
+   if(handle != INVALID_HANDLE)
+   {
+      g_trendPNN.Save(handle);
+      FileClose(handle);
+   }
+   
+   handle = FileOpen("VaaniV9_VolatilityPNN.dat", FILE_BIN|FILE_WRITE);
+   if(handle != INVALID_HANDLE)
+   {
+      g_volatilityPNN.Save(handle);
+      FileClose(handle);
+   }
+   
+   handle = FileOpen("VaaniV9_RiskPNN.dat", FILE_BIN|FILE_WRITE);
+   if(handle != INVALID_HANDLE)
+   {
+      g_riskPNN.Save(handle);
+      FileClose(handle);
+   }
+}
+
+void LoadMLModels()
+{
+   if(g_trendPNN == NULL) return;
+   
+   int handle = FileOpen("VaaniV9_TrendPNN.dat", FILE_BIN|FILE_READ);
+   if(handle != INVALID_HANDLE)
+   {
+      g_trendPNN.Load(handle);
+      FileClose(handle);
+      Print("Trend PNN model loaded successfully");
+   }
+   
+   handle = FileOpen("VaaniV9_VolatilityPNN.dat", FILE_BIN|FILE_READ);
+   if(handle != INVALID_HANDLE)
+   {
+      g_volatilityPNN.Load(handle);
+      FileClose(handle);
+      Print("Volatility PNN model loaded successfully");
+   }
+   
+   handle = FileOpen("VaaniV9_RiskPNN.dat", FILE_BIN|FILE_READ);
+   if(handle != INVALID_HANDLE)
+   {
+      g_riskPNN.Load(handle);
+      FileClose(handle);
+      Print("Risk PNN model loaded successfully");
+   }
+}
+
 }
 
 //+------------------------------------------------------------------+
@@ -642,6 +1521,13 @@ void GenerateAndExecuteSignals()
       double ml_weight = 0.3; // 30% ML, 70% rule-based
       signal_strength = signal_strength * (1.0 - ml_weight) + g_mlSignalStrength * ml_weight;
       signal_reason += " [ML-Enhanced]";
+      
+      // Integrate AI market bias if available
+      if(InpEnableAIAnalysis && MathAbs(g_aiMarketBias) > 0.1)
+      {
+         signal_strength += g_aiMarketBias * g_aiConfidence * 0.2;
+         signal_reason += " [AI-Bias:" + DoubleToString(g_aiMarketBias, 2) + "]";
+      }
    }
    
    // Rule-based safety filters
