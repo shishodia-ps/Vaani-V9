@@ -303,8 +303,15 @@ enum STRATEGY_TYPE
    STRATEGY_BREAKOUT,
    STRATEGY_NEWS_FADE,
    STRATEGY_VOLATILITY,
-   STRATEGY_CORRELATION_HEDGE
+   STRATEGY_CORRELATION_HEDGE,
+   STRATEGY_CRISIS_PROFIT,
+   STRATEGY_NEWS_REACTION
 };
+
+// Global indicator handles
+int g_handleBB_M15, g_handleBB_H1, g_handleBB_H4;
+int g_handleMA_Fast_M15, g_handleMA_Slow_M15;
+int g_handleMA_Fast_H1, g_handleMA_Slow_H1;
 
 // Global state variables
 MARKET_REGIME  g_currentRegime = REGIME_RANGING;
@@ -316,6 +323,10 @@ bool           g_emergencyMode = false;
 bool           g_tradingHalted = false;
 datetime       g_lastTradeTime = 0;
 datetime       g_lastResetTime = 0;
+
+// MACD indicator modes
+#define MODE_MAIN   0
+#define MODE_SIGNAL 1
 
 // Crisis profit management variables
 bool           g_crisisMode = false;
@@ -615,9 +626,17 @@ bool InitializeIndicators()
    g_handleADX_M15 = iADX(_Symbol, PERIOD_M15, 14);
    g_handleADX_H1 = iADX(_Symbol, PERIOD_H1, 14);
    
+   // Moving Average indicators
+   g_handleMA_Fast_M15 = iMA(_Symbol, PERIOD_M15, 10, 0, MODE_SMA, PRICE_CLOSE);
+   g_handleMA_Slow_M15 = iMA(_Symbol, PERIOD_M15, 50, 0, MODE_SMA, PRICE_CLOSE);
+   g_handleMA_Fast_H1 = iMA(_Symbol, PERIOD_H1, 10, 0, MODE_SMA, PRICE_CLOSE);
+   g_handleMA_Slow_H1 = iMA(_Symbol, PERIOD_H1, 50, 0, MODE_SMA, PRICE_CLOSE);
+   
    // Verify all handles are valid
    if(g_handleRSI_M15 == INVALID_HANDLE || g_handleRSI_H1 == INVALID_HANDLE ||
-      g_handleMACD_M15 == INVALID_HANDLE || g_handleATR_M15 == INVALID_HANDLE)
+      g_handleMACD_M15 == INVALID_HANDLE || g_handleATR_M15 == INVALID_HANDLE ||
+      g_handleBB_M15 == INVALID_HANDLE || g_handleBB_H1 == INVALID_HANDLE ||
+      g_handleMA_Fast_M15 == INVALID_HANDLE || g_handleMA_Slow_M15 == INVALID_HANDLE)
    {
       Print("Error: Failed to create indicator handles");
       return false;
@@ -1173,8 +1192,18 @@ double AnalyzeFibonacciLevels()
 
 double GetBollingerPosition(ENUM_TIMEFRAMES timeframe, int shift)
 {
-   double upper = iBands(_Symbol, timeframe, 20, 0, 2.0, PRICE_CLOSE)[shift];
-   double lower = iBands(_Symbol, timeframe, 20, 0, 2.0, PRICE_CLOSE)[shift];
+   double bb_buffer[];
+   int handle = (timeframe == PERIOD_M15) ? g_handleBB_M15 :
+                (timeframe == PERIOD_H1) ? g_handleBB_H1 : g_handleBB_H4;
+   
+   if(handle == INVALID_HANDLE) return 0.5;
+   
+   if(CopyBuffer(handle, 1, shift, 1, bb_buffer) <= 0) return 0.5;
+   double upper = bb_buffer[0];
+   
+   if(CopyBuffer(handle, 2, shift, 1, bb_buffer) <= 0) return 0.5;
+   double lower = bb_buffer[0];
+   
    double close = iClose(_Symbol, timeframe, shift);
    
    if(upper == lower) return 0.5;
@@ -1227,8 +1256,17 @@ double GetMarketVolatility(ENUM_TIMEFRAMES timeframe, int shift)
 
 double GetTrendStrength(ENUM_TIMEFRAMES timeframe, int shift)
 {
-   double ma_fast = iMA(_Symbol, timeframe, 10, 0, MODE_SMA, PRICE_CLOSE, shift);
-   double ma_slow = iMA(_Symbol, timeframe, 50, 0, MODE_SMA, PRICE_CLOSE, shift);
+   double ma_buffer[];
+   int handle_fast = (timeframe == PERIOD_M15) ? g_handleMA_Fast_M15 : g_handleMA_Fast_H1;
+   int handle_slow = (timeframe == PERIOD_M15) ? g_handleMA_Slow_M15 : g_handleMA_Slow_H1;
+   
+   if(handle_fast == INVALID_HANDLE || handle_slow == INVALID_HANDLE) return 0.0;
+   
+   if(CopyBuffer(handle_fast, 0, shift, 1, ma_buffer) <= 0) return 0.0;
+   double ma_fast = ma_buffer[0];
+   
+   if(CopyBuffer(handle_slow, 0, shift, 1, ma_buffer) <= 0) return 0.0;
+   double ma_slow = ma_buffer[0];
    
    if(ma_slow == 0) return 0.0;
    return (ma_fast - ma_slow) / ma_slow;
@@ -1997,8 +2035,14 @@ void ManageExistingPositions()
             ApplyBreakEvenLogic();
          }
          
+         // CRITICAL FIX #9: Breakout logic
+         ApplyBreakoutLogic();
+         
          // CRITICAL FIX #10: Partial close logic
-         ApplyPartialCloseLogic();
+         if(InpPartialCloseMode)
+         {
+            ApplyPartialCloseLogic();
+         }
          
          // Trailing stop logic
          if(InpUseTrailingStop)
@@ -3162,6 +3206,44 @@ void ApplyBreakEvenLogic()
          if(trade.PositionModify(position.Ticket(), new_sl, position.TakeProfit()))
          {
             Print("Break-even applied for SELL position: ", new_sl);
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| CRITICAL FIX #9: Breakout logic                                 |
+//+------------------------------------------------------------------+
+void ApplyBreakoutLogic()
+{
+   double current_price = (position.PositionType() == POSITION_TYPE_BUY) ? 
+                         symbol.Bid() : symbol.Ask();
+   double entry_price = position.PriceOpen();
+   double atr = GetATRValue(PERIOD_M15, 0);
+   
+   if(position.PositionType() == POSITION_TYPE_BUY)
+   {
+      double resistance = entry_price + (atr * 2.0);
+      if(current_price > resistance)
+      {
+         double new_sl = entry_price + (atr * 0.5);
+         if(new_sl > position.StopLoss())
+         {
+            trade.PositionModify(position.Ticket(), new_sl, position.TakeProfit());
+            Print("Breakout confirmed - SL moved to breakeven+");
+         }
+      }
+   }
+   else
+   {
+      double support = entry_price - (atr * 2.0);
+      if(current_price < support)
+      {
+         double new_sl = entry_price - (atr * 0.5);
+         if(new_sl < position.StopLoss() || position.StopLoss() == 0)
+         {
+            trade.PositionModify(position.Ticket(), new_sl, position.TakeProfit());
+            Print("Breakout confirmed - SL moved to breakeven+");
          }
       }
    }
