@@ -560,6 +560,153 @@ InpHedgeWeight = 10           // 10% correlation hedge
 - **Dynamic Adaptation:** Real-time parameter adjustment based on market conditions
 - **Professional Audit Trail:** Complete logging for regulatory compliance
 
+## 🧠 **NEURAL NETWORK SUPPORT FILES - Advanced ML Integration**
+
+The VaaniV9 Elite EA includes sophisticated neural network support files that power the machine learning capabilities:
+
+### **📁 class_pnn.mqh - Probabilistic Neural Network Class**
+
+**Purpose**: Core neural network implementation for pattern recognition and market prediction.
+
+**Key Features**:
+- **Probabilistic Neural Network (PNN)**: Advanced classification algorithm for market pattern recognition
+- **Adaptive Learning**: Continuous improvement based on trading performance
+- **Pattern Storage**: Maintains historical patterns for future reference
+- **Error Calculation**: MSE-based performance monitoring
+- **Model Persistence**: Save/load trained models for continuity
+
+**Usage in VaaniV9 EA**:
+```mql5
+// Neural network is automatically integrated in VaaniV9_Elite.mq5
+// No manual setup required - the EA handles all neural network operations
+
+// Key functions used internally:
+// - CNetPNN(inputs, outputs) - Creates network instance
+// - Learn(patterns, inputs, outputs, epochs, error) - Trains the network
+// - Calculate(input_vector) - Makes predictions
+// - Save(handle) / Load(handle) - Model persistence
+```
+
+**Technical Specifications**:
+- **Input Dimension**: Configurable (default: 10 technical indicators)
+- **Output Dimension**: Market direction prediction (bullish/bearish/neutral)
+- **Learning Algorithm**: Levenberg-Marquardt optimization
+- **Activation Function**: Gaussian radial basis function
+- **Training Data**: Historical price patterns and technical indicators
+
+### **🧪 test_pnn_xor.mq5 - Neural Network Testing Script**
+
+**Purpose**: Validation script to test neural network functionality using XOR problem.
+
+**What It Does**:
+- **XOR Problem Solving**: Classic neural network test case
+- **Network Validation**: Verifies PNN implementation correctness
+- **Performance Testing**: Measures learning accuracy and speed
+- **Model Persistence Testing**: Tests save/load functionality
+
+**How to Use for Testing**:
+
+1. **Compile and Run**:
+   ```
+   - Open test_pnn_xor.mq5 in MetaEditor
+   - Compile the script (F7)
+   - Run as Expert Advisor on any chart
+   - Check Experts tab for results
+   ```
+
+2. **Expected Output**:
+   ```
+   MSE=0.000001 (or similar low error)
+   Check >> 1.0 xor 1.0 = 0(0) // 1.0 xor 0.0 = 1(1) // 0.0 xor 1.0 = 1(1) // 0.0 xor 0.0 = 0(0)
+   Test 1 >> 0.9 xor 0.9 = 0(0) // 0.9 xor 0.1 = 1(1) // 0.1 xor 0.9 = 1(1) // 0.1 xor 0.1 = 0(0)
+   ```
+
+3. **Validation Criteria**:
+   - **MSE < 0.001**: Network learned successfully
+   - **Correct XOR Results**: All test cases produce expected outputs
+   - **File Operations**: Network saves and loads without errors
+
+### **🔧 Integration with VaaniV9 EA**
+
+**Automatic Integration**:
+- **No Manual Setup Required**: Neural networks are embedded directly in VaaniV9_Elite.mq5
+- **Seamless Operation**: Networks train and predict automatically during trading
+- **Zero Dependencies**: All functionality contained within EA file
+
+**Neural Network Features in EA**:
+
+1. **Market Pattern Recognition**:
+   - **Input Features**: RSI, MACD, ATR, ADX, price patterns, volume analysis
+   - **Pattern Classification**: Trend continuation, reversal, ranging market detection
+   - **Confidence Scoring**: Prediction reliability assessment
+
+2. **Adaptive Learning Process**:
+   - **Initial Training**: Uses historical data for baseline model
+   - **Continuous Learning**: Retrains every 50 trades based on performance
+   - **Performance Tracking**: Monitors prediction accuracy and adjusts accordingly
+
+3. **Real-time Prediction**:
+   - **Market Analysis**: Evaluates current market conditions
+   - **Signal Generation**: Provides buy/sell/hold recommendations
+   - **Risk Assessment**: Calculates position sizing based on prediction confidence
+
+### **🎛️ Neural Network Configuration**
+
+**EA Input Parameters** (automatically configured):
+```mql5
+// Neural Network Settings
+InpEnableAdaptiveLearning = true;        // Enable neural network learning
+InpMLConfidenceThreshold = 0.7;          // Minimum prediction confidence (70%)
+InpNeuralNetworkInputs = 10;             // Number of input features
+InpNeuralNetworkOutputs = 3;             // Market direction classes
+InpRetrainingFrequency = 50;             // Retrain every 50 trades
+```
+
+### **📊 Performance Monitoring**
+
+**Neural Network Status Indicators**:
+- ✅ **Network Initialized**: PNN created and ready
+- ✅ **Training Active**: Learning from market data
+- ✅ **Predictions Active**: Generating trading signals
+- ✅ **Performance Tracking**: Monitoring accuracy metrics
+
+**Key Performance Metrics**:
+- **Prediction Accuracy**: Percentage of correct market direction predictions
+- **Mean Squared Error (MSE)**: Network learning performance indicator
+- **Confidence Levels**: Average prediction confidence scores
+- **Retraining Frequency**: How often the network updates its knowledge
+
+### **🔍 Troubleshooting Neural Networks**
+
+**Common Issues and Solutions**:
+
+1. **Low Prediction Accuracy**:
+   - **Cause**: Insufficient training data or market regime change
+   - **Solution**: EA automatically retrains with more recent data
+
+2. **High MSE Values**:
+   - **Cause**: Complex market patterns or noisy data
+   - **Solution**: Network adjusts learning parameters automatically
+
+3. **No Neural Network Activity**:
+   - **Cause**: InpEnableAdaptiveLearning = false
+   - **Solution**: Enable adaptive learning in EA inputs
+
+### **🚀 Advanced Neural Network Features**
+
+**Ensemble Learning**:
+- **Multiple Networks**: Separate networks for trend, volatility, and risk prediction
+- **Weighted Voting**: Combines predictions from multiple networks
+- **Confidence Weighting**: Higher weight for more confident predictions
+
+**Feature Engineering**:
+- **Technical Indicators**: RSI, MACD, Bollinger Bands, ATR, ADX
+- **Price Patterns**: Support/resistance levels, trend lines, chart patterns
+- **Market Microstructure**: Spread analysis, volume patterns, order flow
+- **Temporal Features**: Time of day, day of week, market session analysis
+
+> **Note**: The neural network implementation represents cutting-edge machine learning technology specifically optimized for forex trading, providing the EA with adaptive intelligence that improves over time.
+
 ## 🛡️ **INVINCIBILITY SHIELDS - Ultimate Market Protection**
 
 The VaaniV9 Elite EA now features revolutionary **Invincibility Shields** that provide unprecedented protection against all market threats:
