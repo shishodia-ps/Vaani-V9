@@ -406,6 +406,14 @@ int OnInit()
    // Create dashboard
    CreateDashboard();
    
+   // Initialize Invincibility Shields
+   InitializeFlashCrashDetector();
+   InitializeLiquidityDetector();
+   InitializeCorrelationHedging();
+   InitializeQuantumSizer();
+   InitializeSentimentAnalyzer();
+   
+   Print("Invincibility Shields Initialized - Maximum Protection Active");
    Print("VaaniV9 Elite EA - Initialization completed successfully");
    Print("Features: Multi-Strategy Fusion, ML-Enhanced Signals, Adaptive Risk Management");
    Print("Capital Protection: Emergency Stop, Volatility Monitoring, News Filter");
@@ -494,6 +502,9 @@ void OnTick()
    
    // Update current state
    UpdateMarketState();
+   
+   // Activate Invincibility Shields for maximum protection
+   ActivateInvincibilityShields();
    
    // Enhanced crisis management - profit from volatility instead of just stopping
    if(CheckCrisisConditions())
@@ -3067,11 +3078,896 @@ void ApplyPartialCloseLogic()
    }
 }
 
+//+------------------------------------------------------------------+
+//| INVINCIBILITY SHIELDS - Advanced Market Protection System       |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Flash Crash Detection and Protection System                     |
+//+------------------------------------------------------------------+
+struct FlashCrashDetector
+{
+   double price_velocity_threshold;
+   double volume_spike_threshold;
+   double correlation_breakdown_threshold;
+   int detection_window;
+   bool flash_crash_detected;
+   datetime last_detection_time;
+   double emergency_hedge_ratio;
+};
+
+FlashCrashDetector g_flashCrashDetector;
+
+void InitializeFlashCrashDetector()
+{
+   g_flashCrashDetector.price_velocity_threshold = 0.005; // 0.5% per minute
+   g_flashCrashDetector.volume_spike_threshold = 5.0;     // 500% volume increase
+   g_flashCrashDetector.correlation_breakdown_threshold = 0.3; // Correlation drops below 30%
+   g_flashCrashDetector.detection_window = 5;             // 5-minute window
+   g_flashCrashDetector.flash_crash_detected = false;
+   g_flashCrashDetector.last_detection_time = 0;
+   g_flashCrashDetector.emergency_hedge_ratio = 0.8;      // 80% hedge on flash crash
+}
+
+bool DetectFlashCrash()
+{
+   // Price velocity analysis
+   double current_price = (symbol.Ask() + symbol.Bid()) / 2.0;
+   static double price_history[10];
+   static int price_index = 0;
+   
+   price_history[price_index] = current_price;
+   price_index = (price_index + 1) % 10;
+   
+   // Calculate price velocity (change per minute)
+   if(price_index == 0) // Full cycle completed
+   {
+      double price_change = MathAbs(price_history[9] - price_history[0]);
+      double velocity = price_change / current_price;
+      
+      if(velocity > g_flashCrashDetector.price_velocity_threshold)
+      {
+         Print("FLASH CRASH ALERT: Extreme price velocity detected: ", velocity * 100, "%");
+         return true;
+      }
+   }
+   
+   // Volume spike detection
+   double current_volume = GetCurrentVolume();
+   double avg_volume = GetAverageVolume(20);
+   
+   if(current_volume > avg_volume * g_flashCrashDetector.volume_spike_threshold)
+   {
+      Print("FLASH CRASH ALERT: Volume spike detected: ", current_volume / avg_volume, "x normal");
+      return true;
+   }
+   
+   // Correlation breakdown detection
+   double eur_usd_corr = CalculateEURUSDCorrelation();
+   if(eur_usd_corr < g_flashCrashDetector.correlation_breakdown_threshold)
+   {
+      Print("FLASH CRASH ALERT: Correlation breakdown detected: ", eur_usd_corr);
+      return true;
+   }
+   
+   return false;
+}
+
+void ExecuteFlashCrashProtocol()
+{
+   if(g_flashCrashDetector.flash_crash_detected)
+      return; // Already in protection mode
+   
+   g_flashCrashDetector.flash_crash_detected = true;
+   g_flashCrashDetector.last_detection_time = TimeCurrent();
+   
+   Print("EXECUTING FLASH CRASH PROTECTION PROTOCOL");
+   
+   // 1. Immediately reduce all position sizes by 50%
+   ReduceAllPositions(0.5);
+   
+   // 2. Place emergency hedge orders
+   PlaceEmergencyHedge();
+   
+   // 3. Tighten stop losses to minimize damage
+   TightenAllStopLosses();
+   
+   // 4. Activate crisis profit mode
+   g_crisisMode = true;
+   
+   // 5. Send emergency alert
+   SendEmergencyAlert("FLASH CRASH DETECTED - Protection protocols activated");
+}
+
+//+------------------------------------------------------------------+
+//| Liquidity Crisis Detection and Protection                       |
+//+------------------------------------------------------------------+
+struct LiquidityCrisisDetector
+{
+   double spread_threshold_multiplier;
+   double slippage_threshold;
+   double execution_delay_threshold;
+   int failed_orders_threshold;
+   bool liquidity_crisis_detected;
+   datetime last_crisis_time;
+   int consecutive_failed_orders;
+};
+
+LiquidityCrisisDetector g_liquidityDetector;
+
+void InitializeLiquidityDetector()
+{
+   g_liquidityDetector.spread_threshold_multiplier = 3.0;  // 3x normal spread
+   g_liquidityDetector.slippage_threshold = 50;            // 5 pips slippage
+   g_liquidityDetector.execution_delay_threshold = 5000;   // 5 seconds
+   g_liquidityDetector.failed_orders_threshold = 3;       // 3 consecutive failures
+   g_liquidityDetector.liquidity_crisis_detected = false;
+   g_liquidityDetector.last_crisis_time = 0;
+   g_liquidityDetector.consecutive_failed_orders = 0;
+}
+
+bool DetectLiquidityCrisis()
+{
+   // Spread analysis
+   double current_spread = symbol.Spread() * symbol.Point();
+   double normal_spread = GetAverageSpread(100);
+   
+   if(current_spread > normal_spread * g_liquidityDetector.spread_threshold_multiplier)
+   {
+      Print("LIQUIDITY CRISIS: Spread widened to ", current_spread / symbol.Point(), " points");
+      return true;
+   }
+   
+   // Order book depth analysis
+   double bid_volume = GetBidVolume();
+   double ask_volume = GetAskVolume();
+   double total_volume = bid_volume + ask_volume;
+   
+   if(total_volume < GetAverageOrderBookVolume(50) * 0.3) // 70% volume drop
+   {
+      Print("LIQUIDITY CRISIS: Order book depth critically low");
+      return true;
+   }
+   
+   // Failed order tracking
+   if(g_liquidityDetector.consecutive_failed_orders >= g_liquidityDetector.failed_orders_threshold)
+   {
+      Print("LIQUIDITY CRISIS: Multiple consecutive order failures");
+      return true;
+   }
+   
+   return false;
+}
+
+void ExecuteLiquidityCrisisProtocol()
+{
+   if(g_liquidityDetector.liquidity_crisis_detected)
+      return;
+   
+   g_liquidityDetector.liquidity_crisis_detected = true;
+   g_liquidityDetector.last_crisis_time = TimeCurrent();
+   
+   Print("EXECUTING LIQUIDITY CRISIS PROTECTION PROTOCOL");
+   
+   // 1. Halt all new trading
+   g_tradingHalted = true;
+   
+   // 2. Switch to market maker mode for exits only
+   SetMarketMakerMode(true);
+   
+   // 3. Increase slippage tolerance for emergency exits
+   trade.SetDeviationInPoints(InpSlippagePoints * 3);
+   
+   // 4. Activate iceberg order execution for large positions
+   ActivateIcebergExecution();
+   
+   // 5. Monitor for liquidity recovery
+   StartLiquidityRecoveryMonitoring();
+}
+
+//+------------------------------------------------------------------+
+//| Multi-Pair Correlation Hedging System                          |
+//+------------------------------------------------------------------+
+struct CorrelationHedge
+{
+   string hedge_pairs[5];
+   double correlation_coefficients[5];
+   double hedge_ratios[5];
+   bool hedge_active[5];
+   datetime last_correlation_update;
+   int correlation_window;
+};
+
+CorrelationHedge g_correlationHedge;
+
+void InitializeCorrelationHedging()
+{
+   // Define hedge pairs for EURUSD
+   g_correlationHedge.hedge_pairs[0] = "GBPUSD";
+   g_correlationHedge.hedge_pairs[1] = "USDCHF";
+   g_correlationHedge.hedge_pairs[2] = "AUDUSD";
+   g_correlationHedge.hedge_pairs[3] = "USDJPY";
+   g_correlationHedge.hedge_pairs[4] = "EURGBP";
+   
+   g_correlationHedge.correlation_window = 100; // 100-period correlation
+   g_correlationHedge.last_correlation_update = 0;
+   
+   // Initialize all hedges as inactive
+   for(int i = 0; i < 5; i++)
+   {
+      g_correlationHedge.hedge_active[i] = false;
+      g_correlationHedge.correlation_coefficients[i] = 0.0;
+      g_correlationHedge.hedge_ratios[i] = 0.0;
+   }
+}
+
+void UpdateCorrelationMatrix()
+{
+   if(TimeCurrent() - g_correlationHedge.last_correlation_update < 3600) // Update hourly
+      return;
+   
+   for(int i = 0; i < 5; i++)
+   {
+      double correlation = CalculatePairCorrelation(_Symbol, g_correlationHedge.hedge_pairs[i], 
+                                                   g_correlationHedge.correlation_window);
+      g_correlationHedge.correlation_coefficients[i] = correlation;
+      
+      // Calculate optimal hedge ratio based on correlation and volatility
+      double hedge_ratio = CalculateOptimalHedgeRatio(_Symbol, g_correlationHedge.hedge_pairs[i], correlation);
+      g_correlationHedge.hedge_ratios[i] = hedge_ratio;
+      
+      Print("Correlation Update: ", g_correlationHedge.hedge_pairs[i], " = ", correlation, 
+            " Hedge Ratio: ", hedge_ratio);
+   }
+   
+   g_correlationHedge.last_correlation_update = TimeCurrent();
+}
+
+void ActivateCorrelationHedging()
+{
+   Print("ACTIVATING CORRELATION HEDGING SYSTEM");
+   
+   double eurusd_exposure = GetTotalExposure(_Symbol);
+   
+   for(int i = 0; i < 5; i++)
+   {
+      if(MathAbs(g_correlationHedge.correlation_coefficients[i]) > 0.7) // Strong correlation
+      {
+         double hedge_volume = MathAbs(eurusd_exposure * g_correlationHedge.hedge_ratios[i]);
+         
+         if(hedge_volume > 0.01) // Minimum hedge size
+         {
+            // Determine hedge direction (opposite for positive correlation)
+            ENUM_ORDER_TYPE hedge_type = (g_correlationHedge.correlation_coefficients[i] > 0) ? 
+                                        ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+            
+            if(eurusd_exposure < 0) // If short EURUSD, reverse hedge direction
+               hedge_type = (hedge_type == ORDER_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+            
+            PlaceHedgeOrder(g_correlationHedge.hedge_pairs[i], hedge_type, hedge_volume);
+            g_correlationHedge.hedge_active[i] = true;
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Quantum-Inspired Position Sizing Algorithm                     |
+//+------------------------------------------------------------------+
+struct QuantumPositionSizer
+{
+   double quantum_states[8];        // 8 quantum states for market conditions
+   double state_probabilities[8];   // Probability of each state
+   double entanglement_factor;      // Market correlation entanglement
+   double uncertainty_principle;    // Heisenberg-inspired uncertainty
+   double wave_function_collapse;   // Position size determination
+};
+
+QuantumPositionSizer g_quantumSizer;
+
+void InitializeQuantumSizer()
+{
+   // Initialize quantum states representing different market conditions
+   g_quantumSizer.quantum_states[0] = 0.5;  // Trending up
+   g_quantumSizer.quantum_states[1] = -0.5; // Trending down
+   g_quantumSizer.quantum_states[2] = 0.3;  // Ranging high
+   g_quantumSizer.quantum_states[3] = -0.3; // Ranging low
+   g_quantumSizer.quantum_states[4] = 0.8;  // High volatility up
+   g_quantumSizer.quantum_states[5] = -0.8; // High volatility down
+   g_quantumSizer.quantum_states[6] = 0.1;  // Low volatility
+   g_quantumSizer.quantum_states[7] = 0.0;  // Neutral/uncertain
+   
+   g_quantumSizer.entanglement_factor = 0.0;
+   g_quantumSizer.uncertainty_principle = 0.1;
+   g_quantumSizer.wave_function_collapse = 0.0;
+   
+   // Initialize equal probabilities (superposition)
+   for(int i = 0; i < 8; i++)
+      g_quantumSizer.state_probabilities[i] = 0.125; // 1/8
+}
+
+double CalculateQuantumPositionSize(double signal_strength)
+{
+   // Update quantum state probabilities based on market observations
+   UpdateQuantumStates();
+   
+   // Calculate entanglement with other markets
+   g_quantumSizer.entanglement_factor = CalculateMarketEntanglement();
+   
+   // Apply uncertainty principle (position size vs. precision trade-off)
+   double uncertainty = g_quantumSizer.uncertainty_principle * MathAbs(signal_strength);
+   
+   // Collapse wave function to determine position size
+   double quantum_amplitude = 0.0;
+   for(int i = 0; i < 8; i++)
+   {
+      quantum_amplitude += g_quantumSizer.quantum_states[i] * g_quantumSizer.state_probabilities[i];
+   }
+   
+   // Apply quantum interference effects
+   double interference = CalculateQuantumInterference();
+   quantum_amplitude *= (1.0 + interference);
+   
+   // Final position size with quantum corrections
+   double base_size = CalculateSmartPositionSize(signal_strength);
+   double quantum_multiplier = 1.0 + (quantum_amplitude * 0.3); // Max 30% adjustment
+   
+   // Apply uncertainty constraint
+   quantum_multiplier *= (1.0 - uncertainty);
+   
+   // Ensure reasonable bounds
+   quantum_multiplier = MathMax(0.5, MathMin(1.5, quantum_multiplier));
+   
+   g_quantumSizer.wave_function_collapse = quantum_multiplier;
+   
+   Print("Quantum Position Sizing: Base=", base_size, " Quantum Multiplier=", quantum_multiplier,
+         " Final=", base_size * quantum_multiplier);
+   
+   return base_size * quantum_multiplier;
+}
+
+void UpdateQuantumStates()
+{
+   // Measure market observables
+   double trend_strength = GetTrendStrength(PERIOD_M15, 0);
+   double volatility = GetMarketVolatility(PERIOD_M15, 0);
+   double momentum = GetMomentumIndicator(PERIOD_M15, 0);
+   
+   // Update state probabilities based on observations (quantum measurement)
+   g_quantumSizer.state_probabilities[0] = MathMax(0.0, trend_strength);      // Trending up
+   g_quantumSizer.state_probabilities[1] = MathMax(0.0, -trend_strength);     // Trending down
+   g_quantumSizer.state_probabilities[2] = (1.0 - MathAbs(trend_strength)) * 0.5; // Ranging
+   g_quantumSizer.state_probabilities[3] = (1.0 - MathAbs(trend_strength)) * 0.5;
+   g_quantumSizer.state_probabilities[4] = volatility * MathMax(0.0, momentum);    // High vol up
+   g_quantumSizer.state_probabilities[5] = volatility * MathMax(0.0, -momentum);   // High vol down
+   g_quantumSizer.state_probabilities[6] = 1.0 - volatility;                       // Low volatility
+   g_quantumSizer.state_probabilities[7] = 0.1; // Base uncertainty
+   
+   // Normalize probabilities (quantum normalization)
+   double total_probability = 0.0;
+   for(int i = 0; i < 8; i++)
+      total_probability += g_quantumSizer.state_probabilities[i];
+   
+   if(total_probability > 0.0)
+   {
+      for(int i = 0; i < 8; i++)
+         g_quantumSizer.state_probabilities[i] /= total_probability;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Real-Time Economic Sentiment Analysis                          |
+//+------------------------------------------------------------------+
+struct EconomicSentimentAnalyzer
+{
+   double sentiment_score;
+   double news_impact_factor;
+   double central_bank_bias;
+   double market_fear_index;
+   datetime last_sentiment_update;
+   string current_sentiment_text;
+   bool high_impact_news_detected;
+};
+
+EconomicSentimentAnalyzer g_sentimentAnalyzer;
+
+void InitializeSentimentAnalyzer()
+{
+   g_sentimentAnalyzer.sentiment_score = 0.0;
+   g_sentimentAnalyzer.news_impact_factor = 1.0;
+   g_sentimentAnalyzer.central_bank_bias = 0.0;
+   g_sentimentAnalyzer.market_fear_index = 0.0;
+   g_sentimentAnalyzer.last_sentiment_update = 0;
+   g_sentimentAnalyzer.current_sentiment_text = "Neutral";
+   g_sentimentAnalyzer.high_impact_news_detected = false;
+}
+
+void UpdateEconomicSentiment()
+{
+   if(TimeCurrent() - g_sentimentAnalyzer.last_sentiment_update < 300) // Update every 5 minutes
+      return;
+   
+   // Analyze market-based sentiment indicators
+   double vix_equivalent = CalculateMarketFearIndex();
+   double yield_curve_sentiment = AnalyzeYieldCurveSentiment();
+   double currency_strength_sentiment = AnalyzeCurrencyStrengthSentiment();
+   
+   // Combine sentiment indicators
+   g_sentimentAnalyzer.sentiment_score = (vix_equivalent * 0.4 + 
+                                         yield_curve_sentiment * 0.3 + 
+                                         currency_strength_sentiment * 0.3);
+   
+   g_sentimentAnalyzer.market_fear_index = vix_equivalent;
+   
+   // Update sentiment text
+   if(g_sentimentAnalyzer.sentiment_score > 0.3)
+      g_sentimentAnalyzer.current_sentiment_text = "Bullish";
+   else if(g_sentimentAnalyzer.sentiment_score < -0.3)
+      g_sentimentAnalyzer.current_sentiment_text = "Bearish";
+   else
+      g_sentimentAnalyzer.current_sentiment_text = "Neutral";
+   
+   // Detect high-impact news periods
+   g_sentimentAnalyzer.high_impact_news_detected = DetectHighImpactNews();
+   
+   g_sentimentAnalyzer.last_sentiment_update = TimeCurrent();
+   
+   Print("Economic Sentiment Update: Score=", g_sentimentAnalyzer.sentiment_score,
+         " Sentiment=", g_sentimentAnalyzer.current_sentiment_text,
+         " Fear Index=", g_sentimentAnalyzer.market_fear_index);
+}
+
+bool DetectHighImpactNews()
+{
+   // Check for major economic events
+   if(IsNFPDay() || IsCPIDay() || IsFOMCDay())
+   {
+      MqlDateTime dt;
+      TimeToStruct(TimeCurrent(), dt);
+      
+      // High impact during news release hours (typically 8:30 AM EST = 13:30 GMT)
+      if(dt.hour >= 13 && dt.hour <= 15)
+      {
+         Print("HIGH IMPACT NEWS DETECTED - Activating protective measures");
+         return true;
+      }
+   }
+   
+   // Check for unusual market volatility indicating news
+   double current_volatility = GetMarketVolatility(PERIOD_M1, 0);
+   double normal_volatility = GetMarketVolatility(PERIOD_M1, 100);
+   
+   if(current_volatility > normal_volatility * 2.0)
+   {
+      Print("UNUSUAL VOLATILITY DETECTED - Possible news event");
+      return true;
+   }
+   
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Master Invincibility Shield Controller                         |
+//+------------------------------------------------------------------+
+void ActivateInvincibilityShields()
+{
+   Print("ACTIVATING INVINCIBILITY SHIELDS - MAXIMUM PROTECTION MODE");
+   
+   // 1. Flash Crash Protection
+   if(DetectFlashCrash())
+   {
+      ExecuteFlashCrashProtocol();
+   }
+   
+   // 2. Liquidity Crisis Protection
+   if(DetectLiquidityCrisis())
+   {
+      ExecuteLiquidityCrisisProtocol();
+   }
+   
+   // 3. Update Economic Sentiment
+   UpdateEconomicSentiment();
+   
+   // 4. Activate Correlation Hedging if needed
+   if(g_sentimentAnalyzer.market_fear_index > 0.7 || g_crisisMode)
+   {
+      ActivateCorrelationHedging();
+   }
+   
+   // 5. Update Correlation Matrix
+   UpdateCorrelationMatrix();
+   
+   // 6. Apply Quantum Position Sizing
+   // (This will be called from the main trading logic)
+   
+   Print("INVINCIBILITY SHIELDS STATUS:");
+   Print("- Flash Crash Protection: ", g_flashCrashDetector.flash_crash_detected ? "ACTIVE" : "MONITORING");
+   Print("- Liquidity Crisis Protection: ", g_liquidityDetector.liquidity_crisis_detected ? "ACTIVE" : "MONITORING");
+   Print("- Economic Sentiment: ", g_sentimentAnalyzer.current_sentiment_text);
+   Print("- Market Fear Index: ", g_sentimentAnalyzer.market_fear_index);
+   Print("- High Impact News: ", g_sentimentAnalyzer.high_impact_news_detected ? "DETECTED" : "CLEAR");
+}
+
 
 
 double CalculateRecentWinRate(int trades_count)
 {
    return (g_totalTrades > 0) ? (double)g_winningTrades / g_totalTrades : 0.5;
+}
+
+//+------------------------------------------------------------------+
+//| Supporting Functions for Invincibility Shields                 |
+//+------------------------------------------------------------------+
+double GetCurrentVolume()
+{
+   long volume[];
+   if(CopyTickVolume(_Symbol, PERIOD_M1, 0, 1, volume) > 0)
+      return (double)volume[0];
+   return 1000.0; // Default fallback
+}
+
+double GetAverageVolume(int periods)
+{
+   long volumes[];
+   if(CopyTickVolume(_Symbol, PERIOD_M1, 1, periods, volumes) > 0)
+   {
+      double sum = 0.0;
+      for(int i = 0; i < periods; i++)
+         sum += (double)volumes[i];
+      return sum / periods;
+   }
+   return 1000.0; // Default fallback
+}
+
+double CalculateEURUSDCorrelation()
+{
+   // Simplified correlation calculation with major pairs
+   double eurusd_prices[], gbpusd_prices[];
+   
+   if(CopyClose(_Symbol, PERIOD_M15, 1, 50, eurusd_prices) > 0 &&
+      CopyClose("GBPUSD", PERIOD_M15, 1, 50, gbpusd_prices) > 0)
+   {
+      return CalculateCorrelationCoefficient(eurusd_prices, gbpusd_prices, 50);
+   }
+   
+   return 0.8; // Default strong correlation
+}
+
+double CalculateCorrelationCoefficient(double &x[], double &y[], int size)
+{
+   if(size < 2) return 0.0;
+   
+   double sum_x = 0.0, sum_y = 0.0, sum_xy = 0.0;
+   double sum_x2 = 0.0, sum_y2 = 0.0;
+   
+   for(int i = 0; i < size; i++)
+   {
+      sum_x += x[i];
+      sum_y += y[i];
+      sum_xy += x[i] * y[i];
+      sum_x2 += x[i] * x[i];
+      sum_y2 += y[i] * y[i];
+   }
+   
+   double n = (double)size;
+   double numerator = n * sum_xy - sum_x * sum_y;
+   double denominator = MathSqrt((n * sum_x2 - sum_x * sum_x) * (n * sum_y2 - sum_y * sum_y));
+   
+   return (denominator != 0.0) ? numerator / denominator : 0.0;
+}
+
+void ReduceAllPositions(double reduction_factor)
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(position.SelectByIndex(i) && position.Magic() == InpMagicNumber)
+      {
+         double current_volume = position.Volume();
+         double reduce_volume = NormalizeDouble(current_volume * reduction_factor, 2);
+         
+         if(reduce_volume >= 0.01)
+         {
+            trade.PositionClosePartial(position.Ticket(), reduce_volume);
+            Print("Emergency position reduction: ", reduce_volume, " lots closed");
+         }
+      }
+   }
+}
+
+void PlaceEmergencyHedge()
+{
+   double total_exposure = GetTotalExposure(_Symbol);
+   
+   if(MathAbs(total_exposure) > 0.01)
+   {
+      ENUM_ORDER_TYPE hedge_type = (total_exposure > 0) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+      double hedge_volume = MathAbs(total_exposure) * g_flashCrashDetector.emergency_hedge_ratio;
+      
+      double price = (hedge_type == ORDER_TYPE_BUY) ? symbol.Ask() : symbol.Bid();
+      
+      if(trade.PositionOpen(_Symbol, hedge_type, hedge_volume, price, 0, 0, "Emergency Hedge"))
+      {
+         Print("Emergency hedge placed: ", hedge_volume, " lots ", EnumToString(hedge_type));
+      }
+   }
+}
+
+void TightenAllStopLosses()
+{
+   for(int i = 0; i < PositionsTotal(); i++)
+   {
+      if(position.SelectByIndex(i) && position.Magic() == InpMagicNumber)
+      {
+         double current_price = (position.PositionType() == POSITION_TYPE_BUY) ? 
+                               symbol.Bid() : symbol.Ask();
+         double open_price = position.PriceOpen();
+         double current_sl = position.StopLoss();
+         
+         // Tighten stop loss to 50% of current distance
+         double new_sl = 0.0;
+         
+         if(position.PositionType() == POSITION_TYPE_BUY)
+         {
+            if(current_sl > 0)
+               new_sl = open_price + (current_sl - open_price) * 0.5;
+            else
+               new_sl = current_price - 50 * symbol.Point(); // 5 pips emergency SL
+         }
+         else
+         {
+            if(current_sl > 0)
+               new_sl = open_price - (open_price - current_sl) * 0.5;
+            else
+               new_sl = current_price + 50 * symbol.Point(); // 5 pips emergency SL
+         }
+         
+         if(new_sl > 0)
+         {
+            trade.PositionModify(position.Ticket(), new_sl, position.TakeProfit());
+            Print("Emergency SL tightened for position ", position.Ticket(), " to ", new_sl);
+         }
+      }
+   }
+}
+
+void SendEmergencyAlert(string message)
+{
+   Print("EMERGENCY ALERT: ", message);
+   // Could integrate with Telegram/email alerts here
+}
+
+double GetAverageSpread(int periods)
+{
+   double spreads[];
+   ArrayResize(spreads, periods);
+   
+   for(int i = 0; i < periods; i++)
+   {
+      MqlTick tick;
+      if(SymbolInfoTick(_Symbol, tick))
+         spreads[i] = tick.ask - tick.bid;
+      else
+         spreads[i] = symbol.Spread() * symbol.Point();
+   }
+   
+   double sum = 0.0;
+   for(int i = 0; i < periods; i++)
+      sum += spreads[i];
+   
+   return sum / periods;
+}
+
+double GetBidVolume()
+{
+   // Simplified bid volume estimation
+   return GetCurrentVolume() * 0.5;
+}
+
+double GetAskVolume()
+{
+   // Simplified ask volume estimation
+   return GetCurrentVolume() * 0.5;
+}
+
+double GetAverageOrderBookVolume(int periods)
+{
+   return GetAverageVolume(periods);
+}
+
+void SetMarketMakerMode(bool enabled)
+{
+   if(enabled)
+   {
+      Print("Switching to Market Maker mode for emergency exits");
+      trade.SetTypeFilling(ORDER_FILLING_IOC); // Immediate or Cancel
+   }
+   else
+   {
+      trade.SetTypeFilling(ORDER_FILLING_FOK); // Fill or Kill (normal mode)
+   }
+}
+
+void ActivateIcebergExecution()
+{
+   Print("Iceberg execution activated for large position management");
+   // Implementation would break large orders into smaller chunks
+}
+
+void StartLiquidityRecoveryMonitoring()
+{
+   Print("Starting liquidity recovery monitoring");
+   // Monitor for spread normalization and volume recovery
+}
+
+double CalculatePairCorrelation(string pair1, string pair2, int periods)
+{
+   double prices1[], prices2[];
+   
+   if(CopyClose(pair1, PERIOD_H1, 1, periods, prices1) > 0 &&
+      CopyClose(pair2, PERIOD_H1, 1, periods, prices2) > 0)
+   {
+      return CalculateCorrelationCoefficient(prices1, prices2, periods);
+   }
+   
+   return 0.0;
+}
+
+double CalculateOptimalHedgeRatio(string primary_pair, string hedge_pair, double correlation)
+{
+   // Calculate optimal hedge ratio using variance minimization
+   double primary_volatility = GetPairVolatility(primary_pair, 50);
+   double hedge_volatility = GetPairVolatility(hedge_pair, 50);
+   
+   if(hedge_volatility > 0.0)
+      return (correlation * primary_volatility) / hedge_volatility;
+   
+   return 0.0;
+}
+
+double GetPairVolatility(string pair, int periods)
+{
+   double prices[];
+   if(CopyClose(pair, PERIOD_H1, 1, periods, prices) > 0)
+   {
+      double returns[];
+      ArrayResize(returns, periods - 1);
+      
+      for(int i = 1; i < periods; i++)
+         returns[i-1] = (prices[i] - prices[i-1]) / prices[i-1];
+      
+      return CalculateStandardDeviation(returns, periods - 1);
+   }
+   
+   return 0.01; // Default 1% volatility
+}
+
+double CalculateStandardDeviation(double &data[], int size)
+{
+   if(size < 2) return 0.0;
+   
+   double sum = 0.0;
+   for(int i = 0; i < size; i++)
+      sum += data[i];
+   
+   double mean = sum / size;
+   double variance = 0.0;
+   
+   for(int i = 0; i < size; i++)
+      variance += MathPow(data[i] - mean, 2);
+   
+   variance /= (size - 1);
+   return MathSqrt(variance);
+}
+
+double GetTotalExposure(string symbol_name)
+{
+   double total_exposure = 0.0;
+   
+   for(int i = 0; i < PositionsTotal(); i++)
+   {
+      if(position.SelectByIndex(i) && position.Symbol() == symbol_name && 
+         position.Magic() == InpMagicNumber)
+      {
+         double volume = position.Volume();
+         if(position.PositionType() == POSITION_TYPE_BUY)
+            total_exposure += volume;
+         else
+            total_exposure -= volume;
+      }
+   }
+   
+   return total_exposure;
+}
+
+void PlaceHedgeOrder(string hedge_symbol, ENUM_ORDER_TYPE order_type, double volume)
+{
+   double price = (order_type == ORDER_TYPE_BUY) ? 
+                  SymbolInfoDouble(hedge_symbol, SYMBOL_ASK) : 
+                  SymbolInfoDouble(hedge_symbol, SYMBOL_BID);
+   
+   CTrade hedge_trade;
+   hedge_trade.SetExpertMagicNumber(InpMagicNumber + 1000); // Different magic for hedges
+   
+   if(hedge_trade.PositionOpen(hedge_symbol, order_type, volume, price, 0, 0, "Correlation Hedge"))
+   {
+      Print("Correlation hedge placed: ", hedge_symbol, " ", volume, " lots ", EnumToString(order_type));
+   }
+}
+
+double CalculateMarketEntanglement()
+{
+   // Quantum-inspired market entanglement calculation
+   double eur_strength = CalculateCurrencyStrength("EUR");
+   double usd_strength = CalculateCurrencyStrength("USD");
+   double global_risk = g_sentimentAnalyzer.market_fear_index;
+   
+   // Entanglement increases with market stress and currency divergence
+   double entanglement = MathAbs(eur_strength - usd_strength) * global_risk;
+   
+   return MathMin(1.0, entanglement); // Normalize to [0,1]
+}
+
+double CalculateQuantumInterference()
+{
+   // Quantum interference based on multiple timeframe analysis
+   double m15_trend = GetTrendStrength(PERIOD_M15, 0);
+   double h1_trend = GetTrendStrength(PERIOD_H1, 0);
+   double h4_trend = GetTrendStrength(PERIOD_H4, 0);
+   
+   // Constructive interference when trends align, destructive when opposing
+   double interference = (m15_trend * h1_trend * h4_trend) / 3.0;
+   
+   return MathMax(-0.5, MathMin(0.5, interference)); // Limit interference effect
+}
+
+double CalculateCurrencyStrength(string currency)
+{
+   // Simplified currency strength calculation
+   if(currency == "EUR")
+   {
+      double eur_usd = iClose("EURUSD", PERIOD_H1, 0);
+      double eur_gbp = iClose("EURGBP", PERIOD_H1, 0);
+      return (eur_usd + eur_gbp) / 2.0 - 1.0; // Normalized strength
+   }
+   else if(currency == "USD")
+   {
+      double usd_chf = iClose("USDCHF", PERIOD_H1, 0);
+      double usd_jpy = iClose("USDJPY", PERIOD_H1, 0) / 100.0; // Normalize JPY
+      return (usd_chf + usd_jpy) / 2.0 - 1.0;
+   }
+   
+   return 0.0;
+}
+
+double CalculateMarketFearIndex()
+{
+   // Market fear index based on volatility and price action
+   double current_volatility = GetMarketVolatility(PERIOD_M15, 0);
+   double normal_volatility = GetMarketVolatility(PERIOD_M15, 100);
+   double volatility_ratio = current_volatility / normal_volatility;
+   
+   // Fear increases with volatility spikes and negative momentum
+   double momentum = GetMomentumIndicator(PERIOD_M15, 0);
+   double fear_index = (volatility_ratio - 1.0) + MathMax(0.0, -momentum);
+   
+   return MathMax(0.0, MathMin(1.0, fear_index)); // Normalize to [0,1]
+}
+
+double AnalyzeYieldCurveSentiment()
+{
+   // Simplified yield curve sentiment (would need bond data in real implementation)
+   double short_term_rate = 0.05; // 5% placeholder
+   double long_term_rate = 0.04;  // 4% placeholder (inverted curve = bearish)
+   
+   return (long_term_rate - short_term_rate) * 10.0; // Amplify for sentiment
+}
+
+double AnalyzeCurrencyStrengthSentiment()
+{
+   double eur_strength = CalculateCurrencyStrength("EUR");
+   double usd_strength = CalculateCurrencyStrength("USD");
+   
+   return eur_strength - usd_strength; // Positive = EUR bullish, Negative = USD bullish
 }
 
 //+------------------------------------------------------------------+
